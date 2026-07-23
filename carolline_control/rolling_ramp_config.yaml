@@ -1,0 +1,36 @@
+# Rolling ramp analysis configuration (separate from main flight mission)
+model_path: "mujoco_menagerie-main/skydio_x2/scene.xml"
+
+sim_duration: 360.0
+log_path: "carolline_control/logs/rolling_ramp_log.csv"
+plot_dir: "carolline_control/plots/rolling_ramp"
+
+spawn_xy: [0.5, 0.0]
+ground_z: 0.40
+random_initial_orientation: false
+seed: 42
+
+# Ramp course geometry (flat → up → flat → down → flat)
+ramp:
+  angle_deg: 5.0
+  flat_start: 1.5
+  ramp_length: 3.5
+  flat_top: 4.0
+  flat_end: 2.0
+  width: 2.5
+  y_center: 0.0
+
+# Path following (arc-length + cross-track)
+lookahead: 0.35
+path_kp: 0.70
+path_kd: 0.75
+cross_kp: 1.0
+cross_kd: 0.70
+thrust_scale: 0.50
+
+# Rolling controller tuning
+rolling_max_speed: 0.38
+rolling_kp: 0.65
+rolling_kd: 1.05
+path_kp: 0.70
+roll_position_tolerance: 0.12

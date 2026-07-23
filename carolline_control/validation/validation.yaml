@@ -1,0 +1,96 @@
+# CAROLLINE research validation suite configuration
+# Controller and state machine are never modified by this module.
+
+num_runs: 200
+base_seed: 42
+sim_duration: 300.0
+mission_timeout: 320.0
+controller_config: "carolline_control/config.yaml"
+output_dir: "carolline_control/validation/results"
+
+# Monte Carlo randomization bounds (all optional / disable with enabled: false)
+randomization:
+  enabled: true
+  initial_roll_deg: [-180, 180]
+  initial_pitch_deg: [35, 85]
+  initial_yaw_deg: [-180, 180]
+  initial_omega_body: [-0.5, 0.5]          # rad/s per axis
+  initial_velocity: [-0.2, 0.2]             # m/s per axis
+  spawn_xy_offset: [-0.3, 0.3]              # m relative to mission spawn
+  mass_fraction: [-0.05, 0.05]
+  inertia_fraction: [-0.05, 0.05]
+  motor_effectiveness: [-0.05, 0.05]
+  ground_friction_scale: [0.5, 1.5]
+  cage_friction_scale: [0.5, 1.5]
+  rolling_resistance_scale: [0.5, 1.5]
+  wind_magnitude: [0.0, 5.0]                # m/s
+  wind_direction_random: true
+  wind_gust_probability: 0.15
+  wind_gust_magnitude: [1.0, 8.0]
+  gyro_noise_std: [0.0, 0.05]
+  accel_noise_std: [0.0, 0.3]
+  gyro_bias: [-0.02, 0.02]
+  accel_bias: [-0.1, 0.1]
+  position_noise_std: [0.0, 0.02]
+  actuator_delay_steps: [0, 3]
+  control_dt_jitter: [0.0, 0.001]
+  timestep_jitter: [0.0, 0.0005]
+
+physics:
+  quat_norm_tol: 1.0e-3
+  orthogonality_tol: 1.0e-2
+  force_residual_tol: 2.0                   # N
+  torque_residual_tol: 0.5                  # Nm
+  thrust_sum_tol: 0.5                       # N
+
+health:
+  oscillation_threshold: 0.15             # normalized FFT peak
+  min_samples_fft: 128
+
+sensitivity:
+  gains: [kx, kv, kR, kOmega, kR_pre, kOmega_pre, rolling_kp, rolling_kd]
+  sweep_fractions: [-0.30, -0.20, -0.10, 0.0, 0.10, 0.20, 0.30]
+
+campaigns:
+  nominal:
+    description: "Nominal Monte Carlo"
+    overrides: {}
+  constant_wind:
+    description: "Constant wind sweep"
+    wind_speeds: [0, 1, 2, 3, 5, 8, 10]
+    runs_per_speed: 30
+  random_wind_direction:
+    description: "Random wind direction"
+    overrides:
+      randomization:
+        wind_magnitude: [2.0, 8.0]
+        wind_direction_random: true
+  sinusoidal_wind:
+    description: "Sinusoidal wind disturbance"
+    overrides:
+      randomization:
+        wind_magnitude: [0.0, 1.0]
+  dryden_turbulence:
+    description: "Dryden-like turbulence"
+    overrides:
+      randomization:
+        wind_magnitude: [1.0, 4.0]
+  wind_gust:
+    description: "Wind gust events"
+    overrides: {}
+  mass_uncertainty:
+    description: "Mass and inertia uncertainty only"
+    overrides: {}
+  sensor_noise:
+    description: "Elevated sensor noise and bias"
+    overrides: {}
+  actuator_delay:
+    description: "Actuator delay sweep"
+    overrides: {}
+  combined_disturbances:
+    description: "Combined uncertainty + wind + noise + delay"
+    overrides:
+      randomization:
+        wind_magnitude: [0.0, 8.0]
+        gyro_noise_std: [0.01, 0.05]
+        actuator_delay_steps: [1, 4]

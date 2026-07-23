@@ -1,0 +1,51 @@
+Samples: 18504  Duration: 74.0s
+Modes: {'ROLLING': 2692, 'PRETAKEOFF': 745, 'UPRIGHT': 375, 'TAKEOFF': 536, 'HOVER': 750, 'FLIGHT': 12413, 'LANDING': 492, 'IDLE': 501}
+
+[ROLLING] n=2692 dt=10.76s
+  pos RMS=1.527m  |e| max=3.000m
+  thrust: mean=1.33 std=0.149 range=[1.18,1.58] N
+  motor spread: mean=4.124 max=26.000 N  sat=4.0%
+  tilt: mean=80.96 max=118.17 deg  |moment| mean=0.646 Nm
+
+[PRETAKEOFF] n=745 dt=2.98s
+  pos RMS=0.600m  |e| max=0.600m
+  thrust: mean=2.22 std=1.014 range=[0.36,3.09] N
+  motor spread: mean=5.292 max=26.000 N  sat=11.4%
+  tilt: mean=37.99 max=83.46 deg  |moment| mean=0.695 Nm
+
+[UPRIGHT] n=375 dt=1.50s
+  pos RMS=0.600m  |e| max=0.600m
+  thrust: mean=1.41 std=0.000 range=[1.41,1.41] N
+  motor spread: mean=0.180 max=0.667 N  sat=0.0%
+  tilt: mean=4.69 max=8.75 deg  |moment| mean=0.047 Nm
+
+[TAKEOFF] n=536 dt=2.14s
+  pos RMS=0.272m  |e| max=0.600m
+  thrust: mean=20.86 std=5.697 range=[6.02,32.04] N
+  motor spread: mean=0.037 max=0.316 N  sat=0.0%
+  tilt: mean=0.56 max=1.57 deg  |moment| mean=0.010 Nm
+
+[HOVER] n=750 dt=3.00s
+  pos RMS=0.017m  |e| max=0.031m
+  thrust: mean=20.92 std=0.178 range=[20.80,21.47] N
+  motor spread: mean=0.010 max=0.166 N  sat=0.0%
+  tilt: mean=0.14 max=0.50 deg  |moment| mean=0.003 Nm
+
+[FLIGHT] n=12413 dt=49.65s
+  pos RMS=0.071m  |e| max=0.150m
+  thrust: mean=20.86 std=0.012 range=[20.84,20.88] N
+  motor spread: mean=0.015 max=0.168 N  sat=0.0%
+  tilt: mean=2.05 max=3.75 deg  |moment| mean=0.004 Nm
+  roll err RMS=0.45 deg  pitch err RMS=0.47 deg
+
+[LANDING] n=492 dt=1.96s
+  pos RMS=0.247m  |e| max=0.583m
+  thrust: mean=9.00 std=9.517 range=[1.04,23.56] N
+  motor spread: mean=0.168 max=0.892 N  sat=0.0%
+  tilt: mean=1.50 max=3.08 deg  |moment| mean=0.038 Nm
+
+[IDLE] n=501 dt=2.00s
+  pos RMS=0.000m  |e| max=0.000m
+  thrust: mean=0.00 std=0.000 range=[0.00,0.00] N
+  motor spread: mean=0.018 max=0.097 N  sat=0.0%
+  tilt: mean=0.04 max=0.11 deg  |moment| mean=0.004 Nm

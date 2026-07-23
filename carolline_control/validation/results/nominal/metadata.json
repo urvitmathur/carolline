@@ -1,0 +1,19 @@
+{
+  "campaign": "nominal",
+  "timestamp_utc": "2026-07-22T16:04:50.704095+00:00",
+  "num_runs": 5,
+  "validation_config": {
+    "num_runs": 5,
+    "base_seed": 42,
+    "sim_duration": 120.0,
+    "mission_timeout": 320.0,
+    "controller_config": "carolline_control/config.yaml"
+  },
+  "statistics_summary": {
+    "success_rate": 0.0,
+    "failure_histogram": {
+      "FAILED_UPRIGHT": 3,
+      "FAILED_WAYPOINT": 2
+    }
+  }
+}
