@@ -1,4 +1,5 @@
 # Rolling ramp analysis configuration (separate from main flight mission)
+# Used by: rolling_ramp_analysis.py AND manual_teleop --scene ramp
 model_path: "mujoco_menagerie-main/skydio_x2/scene.xml"
 
 sim_duration: 360.0
@@ -12,7 +13,7 @@ seed: 42
 
 # Ramp course geometry (flat → up → flat → down → flat)
 ramp:
-  angle_deg: 5.0
+  angle_deg: 25.0
   flat_start: 1.5
   ramp_length: 3.5
   flat_top: 4.0

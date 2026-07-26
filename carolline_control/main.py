@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import time
 from pathlib import Path
 
 import mujoco
@@ -62,6 +63,8 @@ def main() -> None:
     config = load_config(args.config)
 
     model = compile_model_with_markers(config.model_path, config)
+    if "timestep" in raw:
+        model.opt.timestep = float(raw["timestep"])
     data = mujoco.MjData(model)
 
     estimator = StateEstimator(model, config)
@@ -90,12 +93,23 @@ def main() -> None:
         print(f"Initial pose: pos=({initial_qpos[0]:.2f}, {initial_qpos[1]:.2f}, {initial_qpos[2]:.2f})")
 
     duration = float(raw.get("sim_duration", 120.0))
+    idle_exit_delay = float(raw.get("idle_exit_delay", 3.0))
+    viewer_realtime = bool(raw.get("viewer_realtime", True))
+    viewer_speed = max(float(raw.get("viewer_speed", 1.0)), 0.05)
+    viewer_hold_after_idle = float(raw.get("viewer_hold_after_idle", 25.0))
     dt = float(model.opt.timestep)
 
     print(f"Loaded model: {config.model_path}")
     print(f"Mass: {config.mass:.3f} kg, hover thrust ~ {config.mass * config.gravity:.2f} N")
     print(f"Motors: [{config.motor_min:.1f}, {config.motor_max:.1f}] N (bidirectional)")
     print(f"Mission: roll to {config.roll_target}, fly {config.leg_distance} m/cardinal, land at spawn")
+    print(
+        f"Flight pacing: segment={config.segment_duration:.1f}s, "
+        f"waypoint dwell={config.waypoint_dwell_time:.1f}s, "
+        f"hover before flight={config.hover_before_flight_time:.1f}s"
+    )
+    if not args.no_viewer and viewer_realtime:
+        print(f"Viewer: realtime at {viewer_speed:.2f}x (hold {viewer_hold_after_idle:.0f}s after mission)")
     print("Viewer markers: green=spawn, red=roll target, blue=flight waypoints")
     print(f"Initial mode: {controller.mode_manager.mode.name} (transitions logged to {log_path})")
     if args.debug_pipeline:
@@ -119,7 +133,7 @@ def main() -> None:
         if mode == ControlMode.IDLE:
             if idle_since is None:
                 idle_since = state.time
-            elif state.time - idle_since > 2.0:
+            elif state.time - idle_since > idle_exit_delay:
                 return False
         else:
             idle_since = None
@@ -135,10 +149,29 @@ def main() -> None:
         run_loop(lambda: mujoco.mj_step(model, data))
     else:
         with mujoco.viewer.launch_passive(model, data) as viewer:
-            while viewer.is_running() and data.time < duration:
-                if not control_step():
-                    break
-                mujoco.mj_step(model, data)
+            wall_anchor = time.perf_counter()
+            sim_anchor = data.time
+            mission_finished_at: float | None = None
+
+            while viewer.is_running():
+                sim_active = data.time < duration and mission_finished_at is None
+                if sim_active:
+                    if not control_step():
+                        mission_finished_at = time.perf_counter()
+                    else:
+                        mujoco.mj_step(model, data)
+                        if viewer_realtime:
+                            sim_elapsed = data.time - sim_anchor
+                            wall_elapsed = time.perf_counter() - wall_anchor
+                            delay = (sim_elapsed / viewer_speed) - wall_elapsed
+                            if delay > 0.0:
+                                time.sleep(delay)
+                else:
+                    if mission_finished_at is None:
+                        mission_finished_at = time.perf_counter()
+                    if time.perf_counter() - mission_finished_at >= viewer_hold_after_idle:
+                        break
+                    time.sleep(0.05)
                 viewer.sync()
 
     logger.close()
