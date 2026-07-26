@@ -87,6 +87,9 @@ def load_config(path: str | Path) -> ControllerConfig:
         ground_height_threshold=float(raw["ground_height_threshold"]),
         hover_altitude_tolerance=float(raw.get("hover_altitude_tolerance", 0.1)),
         hover_velocity_tolerance=float(raw.get("hover_velocity_tolerance", 0.2)),
+        takeoff_horizontal_velocity_tolerance=float(
+            raw.get("takeoff_horizontal_velocity_tolerance", 0.45)
+        ),
         min_airborne_thrust_fraction=float(raw.get("min_airborne_thrust_fraction", 0.15)),
         landing_settle_time=float(raw.get("landing_settle_time", 1.0)),
         pre_takeoff_thrust_fraction=float(raw["pre_takeoff_thrust_fraction"]),
@@ -96,12 +99,15 @@ def load_config(path: str | Path) -> ControllerConfig:
         motor_slew_rate=float(raw.get("motor_slew_rate", 1200.0)),
         roll_target=roll_target,
         roll_position_tolerance=float(mission.get("roll_position_tolerance", 0.2)),
+        roll_arrival_speed=float(raw.get("roll_arrival_speed", 0.35)),
         spawn_xy=spawn_xy,
         leg_distance=float(mission.get("leg_distance", 3.0)),
         segment_duration=float(mission.get("segment_duration", 7.0)),
         mission_yaw=float(mission.get("mission_yaw", 0.0)),
         min_flight_center_z=float(raw.get("min_flight_center_z", 0.72)),
         waypoint_reach_tolerance=float(mission.get("waypoint_reach_tolerance", 0.15)),
+        waypoint_dwell_time=float(mission.get("waypoint_dwell_time", 3.0)),
+        hover_before_flight_time=float(raw.get("hover_before_flight_time", 5.0)),
         yaw_drag_coeff=np.asarray(raw["yaw_drag_coeff"], dtype=float),
         rotor_positions=np.asarray(raw["rotor_positions"], dtype=float),
         ground_omega_weights=np.asarray(
@@ -119,6 +125,11 @@ def load_config(path: str | Path) -> ControllerConfig:
         ),
         pre_takeoff_omega_gain=float(raw.get("pre_takeoff_omega_gain", 1.5)),
         pre_takeoff_omega_limit=float(raw.get("pre_takeoff_omega_limit", 6.0)),
+        pre_takeoff_omega_kp=np.asarray(
+            raw.get("pre_takeoff_omega_kp", raw.get("ground_omega_kp", [8.0, 8.0, 3.0])),
+            dtype=float,
+        ),
+        pre_upright_settle_time=float(raw.get("pre_upright_settle_time", 0.12)),
         contact_min_normal_z=float(raw.get("contact_min_normal_z", 0.15)),
         contact_force_threshold=float(raw.get("contact_force_threshold", 0.0)),
         contact_loss_grace=float(raw.get("contact_loss_grace", 0.30)),
@@ -129,6 +140,10 @@ def load_config(path: str | Path) -> ControllerConfig:
         ),
         initial_mode=_mode_from_string(raw.get("initial_mode", "PRETAKEOFF")),
         waypoints=waypoints,
+        esc_mapping_enabled=bool(raw.get("esc_mapping_enabled", True)),
+        esc_thrust_forward_max=float(raw.get("esc_thrust_forward_max", raw["motor_max"])),
+        esc_thrust_reverse_max=float(raw.get("esc_thrust_reverse_max", 10.0)),
+        esc_reverse_efficiency=float(raw.get("esc_reverse_efficiency", 0.72)),
     )
 
 

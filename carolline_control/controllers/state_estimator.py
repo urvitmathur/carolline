@@ -142,8 +142,9 @@ class StateEstimator:
         contact_valid, contact_point, contact_normal, contact_force = self._support_contact(
             data, position
         )
-        fallback_ground = position[2] <= self._config.ground_height_threshold
-        on_ground = contact_valid or fallback_ground
+        # Treat the vehicle as grounded while the cage center remains near the
+        # support plane, even if the contact solver briefly loses rib contacts.
+        on_ground = contact_valid or position[2] <= self._config.cage_radius + 0.12
         if contact_valid:
             # Existing landing logic expects a center-height reference.
             ground_contact_z = float(position[2])

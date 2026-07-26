@@ -208,6 +208,7 @@ def test_rolling_planner_uses_configured_braking_distance() -> None:
     config = _config()
     config.rolling_max_speed = 3.5
     config.rolling_braking_distance = 2.2
+    config.roll_position_tolerance = 0.2
     config.roll_target = np.array([1.2, 0.0])
     state = _state()
     state.position[:2] = 0.0

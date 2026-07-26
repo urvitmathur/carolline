@@ -18,6 +18,7 @@ from pathlib import Path
 import mujoco
 import mujoco.viewer
 import numpy as np
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -28,22 +29,53 @@ from carolline_control.config_loader import load_config
 from carolline_control.controllers.state_estimator import StateEstimator
 from carolline_control.utils.types import ControlMode
 
+ROLLING_RAMP_CONFIG = REPO_ROOT / "carolline_control" / "rolling_ramp_config.yaml"
 
-RAMP_ANGLE_DEG = 5.0
-RAMP_START_X = 1.4
-RAMP_LENGTH = 4.0
-RAMP_WIDTH = 3.0
+# Defaults for the simple single-ramp teleop scene (overridden by rolling_ramp_config.yaml)
+_DEFAULT_RAMP = {
+    "angle_deg": 5.0,
+    "flat_start": 1.4,
+    "ramp_length": 4.0,
+    "width": 3.0,
+}
 RAMP_THICKNESS = 0.10
 TARGET_EDGE_CLEARANCE = 0.55
 
 
-def _ramp_geometry(cage_radius: float) -> tuple[np.ndarray, np.ndarray]:
-    angle = np.radians(RAMP_ANGLE_DEG)
+def load_ramp_scene_params(
+    *,
+    angle_deg: float | None = None,
+    ramp_length: float | None = None,
+    flat_start: float | None = None,
+    width: float | None = None,
+) -> dict[str, float]:
+    """Load ramp geometry; rolling_ramp_config.yaml overrides script defaults."""
+    params = dict(_DEFAULT_RAMP)
+    if ROLLING_RAMP_CONFIG.exists():
+        with ROLLING_RAMP_CONFIG.open("r", encoding="utf-8") as handle:
+            raw = yaml.safe_load(handle) or {}
+        ramp = raw.get("ramp", {})
+        for key in _DEFAULT_RAMP:
+            if key in ramp:
+                params[key] = float(ramp[key])
+    if angle_deg is not None:
+        params["angle_deg"] = float(angle_deg)
+    if ramp_length is not None:
+        params["ramp_length"] = float(ramp_length)
+    if flat_start is not None:
+        params["flat_start"] = float(flat_start)
+    if width is not None:
+        params["width"] = float(width)
+    return params
+
+
+def _ramp_geometry(cage_radius: float, params: dict[str, float]) -> tuple[np.ndarray, np.ndarray]:
+    angle = np.radians(params["angle_deg"])
     normal = np.array([-np.sin(angle), 0.0, np.cos(angle)])
-    along = RAMP_LENGTH - TARGET_EDGE_CLEARANCE
+    along = params["ramp_length"] - TARGET_EDGE_CLEARANCE
     surface_target = np.array(
         [
-            RAMP_START_X + along * np.cos(angle),
+            params["flat_start"] + along * np.cos(angle),
             0.0,
             along * np.sin(angle),
         ]
@@ -51,16 +83,30 @@ def _ramp_geometry(cage_radius: float) -> tuple[np.ndarray, np.ndarray]:
     return surface_target + cage_radius * normal, normal
 
 
-def compile_scene(model_path: Path, cage_radius: float) -> mujoco.MjModel:
+def compile_scene(
+    model_path: Path,
+    cage_radius: float,
+    *,
+    angle_deg: float | None = None,
+    ramp_length: float | None = None,
+    flat_start: float | None = None,
+    width: float | None = None,
+) -> mujoco.MjModel:
+    params = load_ramp_scene_params(
+        angle_deg=angle_deg,
+        ramp_length=ramp_length,
+        flat_start=flat_start,
+        width=width,
+    )
     spec = mujoco.MjSpec.from_file(str(model_path))
     world = spec.worldbody
-    angle = np.radians(RAMP_ANGLE_DEG)
+    angle = np.radians(params["angle_deg"])
     normal = np.array([-np.sin(angle), 0.0, np.cos(angle)])
     surface_midpoint = np.array(
         [
-            RAMP_START_X + 0.5 * RAMP_LENGTH * np.cos(angle),
+            params["flat_start"] + 0.5 * params["ramp_length"] * np.cos(angle),
             0.0,
-            0.5 * RAMP_LENGTH * np.sin(angle),
+            0.5 * params["ramp_length"] * np.sin(angle),
         ]
     )
     center = surface_midpoint - RAMP_THICKNESS * normal
@@ -72,7 +118,7 @@ def compile_scene(model_path: Path, cage_radius: float) -> mujoco.MjModel:
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=center.tolist(),
         quat=ramp_quat,
-        size=[0.5 * RAMP_LENGTH + 0.12, 0.5 * RAMP_WIDTH, RAMP_THICKNESS],
+        size=[0.5 * params["ramp_length"] + 0.12, 0.5 * params["width"], RAMP_THICKNESS],
         rgba=[0.42, 0.52, 0.32, 1.0],
         friction=[1.20, 0.02, 0.01],
         contype=1,
@@ -80,7 +126,7 @@ def compile_scene(model_path: Path, cage_radius: float) -> mujoco.MjModel:
         condim=6,
     )
 
-    target, _ = _ramp_geometry(cage_radius)
+    target, _ = _ramp_geometry(cage_radius, params)
     marker = world.add_body(name="ramp_hold_target", mocap=True, pos=target.tolist())
     marker.add_geom(
         type=mujoco.mjtGeom.mjGEOM_SPHERE,
@@ -106,7 +152,8 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
-    target, expected_normal = _ramp_geometry(config.cage_radius)
+    ramp_params = load_ramp_scene_params()
+    target, expected_normal = _ramp_geometry(config.cage_radius, ramp_params)
     config.initial_mode = ControlMode.ROLLING
     config.spawn_xy = np.array([0.0, 0.0])
     config.roll_target = target[:2].copy()
@@ -131,7 +178,8 @@ def main() -> None:
     hold_announced = False
     telemetry: dict[str, np.ndarray | float | bool] = {}
 
-    print("CAROLLINE 30-degree ramp hold test")
+    print("CAROLLINE ramp hold test")
+    print(f"  ramp angle: {ramp_params['angle_deg']:.1f} deg  (rolling_ramp_config.yaml)")
     print(f"  target center: [{target[0]:.2f}, {target[1]:.2f}, {target[2]:.2f}] m")
     print(f"  expected normal: {expected_normal}")
 
@@ -174,9 +222,8 @@ def main() -> None:
             control_step()
             mujoco.mj_step(model, data)
     else:
-        ramp_mid_x = RAMP_START_X + 0.5 * RAMP_LENGTH * np.cos(
-            np.radians(RAMP_ANGLE_DEG)
-        )
+        angle = np.radians(ramp_params["angle_deg"])
+        ramp_mid_x = ramp_params["flat_start"] + 0.5 * ramp_params["ramp_length"] * np.cos(angle)
         with mujoco.viewer.launch_passive(model, data) as viewer:
             viewer.cam.lookat[:] = [ramp_mid_x, 0.0, 1.0]
             viewer.cam.distance = 8.0

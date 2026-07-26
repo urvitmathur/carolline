@@ -42,12 +42,12 @@ class ModeManager:
         """Evaluate transition rules and return active mode."""
         if self.mode == ControlMode.ROLLING:
             pos_err = state.position[:2] - self.config.roll_target
-            at_goal = (
-                state.on_ground
-                and float(np.linalg.norm(pos_err)) < self.config.roll_position_tolerance
-                and float(np.linalg.norm(state.velocity[:2])) < 0.08
+            dist = float(np.linalg.norm(pos_err))
+            near_goal = state.on_ground and dist < self.config.roll_position_tolerance
+            speed_ok = (
+                float(np.linalg.norm(state.velocity[:2])) < self.config.roll_arrival_speed
             )
-            if at_goal and not self.rolling_hold_requested:
+            if near_goal and speed_ok and not self.rolling_hold_requested:
                 self.rolling_timer += dt
                 if self.rolling_timer >= 0.5:
                     self.resume_rolling_after_recovery = False
@@ -78,10 +78,11 @@ class ModeManager:
 
         elif self.mode == ControlMode.PRETAKEOFF:
             bz = float(body_z_world(state.rotation)[2])
-            omega_ok = float(np.linalg.norm(state.omega_body)) < self.config.upright_omega_tolerance
+            omega_tol = max(self.config.upright_omega_tolerance, 0.55)
+            omega_ok = float(np.linalg.norm(state.omega_body)) < omega_tol
             if bz >= self.config.upright_cos_threshold and omega_ok:
                 self.pre_upright_timer += dt
-                if self.pre_upright_timer >= 0.4:
+                if self.pre_upright_timer >= self.config.pre_upright_settle_time:
                     self.mode = ControlMode.UPRIGHT
                     self.upright_timer = 0.0
             else:
@@ -113,8 +114,10 @@ class ModeManager:
             alt_err = abs(state.position[2] - self.config.hover_height)
             alt_ok = alt_err < self.config.hover_altitude_tolerance
             upright = bz >= self.config.takeoff_cos_threshold
-            vel_ok = float(np.linalg.norm(state.velocity)) < self.config.hover_velocity_tolerance
-            if alt_ok and upright and vel_ok:
+            vel_z_ok = abs(state.velocity[2]) < self.config.hover_velocity_tolerance
+            vel_xy = float(np.linalg.norm(state.velocity[:2]))
+            vel_xy_ok = vel_xy < self.config.takeoff_horizontal_velocity_tolerance
+            if alt_ok and upright and vel_z_ok and vel_xy_ok:
                 self.mode = ControlMode.HOVER
                 self.hover_timer = 0.0
 
@@ -125,7 +128,7 @@ class ModeManager:
             alt_ok = alt_err < self.config.hover_altitude_tolerance
             vel_ok = float(np.linalg.norm(state.velocity)) < self.config.hover_velocity_tolerance
             upright = bz >= self.config.upright_cos_threshold
-            if self.hover_timer > 3.0 and alt_ok and vel_ok and upright:
+            if self.hover_timer >= self.config.hover_before_flight_time and alt_ok and vel_ok and upright:
                 self.mode = ControlMode.FLIGHT
 
         elif self.mode == ControlMode.FLIGHT:

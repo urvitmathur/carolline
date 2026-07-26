@@ -97,20 +97,24 @@ class FlightController:
                 )
                 min_vertical = weight * (1.08 + 0.35 * climb_frac)
                 f_des[2] = max(f_des[2], min_vertical)
-            if state.on_ground:
+            # Damp horizontal carry-over from rolling before switching to HOVER.
+            f_des[0] -= mass * 3.0 * state.velocity[0]
+            f_des[1] -= mass * 3.0 * state.velocity[1]
+            if state.contact_valid and state.position[2] < self._config.takeoff_height + 0.05:
                 f_des[2] = min(f_des[2], weight * 1.45)
 
         if mode == ControlMode.HOVER:
-            f_des[0] -= 0.6 * kv * state.velocity[0]
-            f_des[1] -= 0.6 * kv * state.velocity[1]
+            if np.linalg.norm(target.velocity[:2]) < 0.05:
+                f_des[0] -= 0.6 * kv * state.velocity[0]
+                f_des[1] -= 0.6 * kv * state.velocity[1]
 
         if mode != ControlMode.LANDING:
             alt_margin = state.position[2] - min_center_z
-            if alt_margin < 0.35:
+            if alt_margin < 0.35 and np.linalg.norm(target.velocity[:2]) < 0.05:
                 tilt_scale = float(np.clip(alt_margin / 0.35, 0.12, 1.0))
                 f_des[0] *= tilt_scale
                 f_des[1] *= tilt_scale
-            if mode == ControlMode.FLIGHT:
+            if mode == ControlMode.FLIGHT and np.linalg.norm(target.velocity[:2]) < 0.05:
                 hover_margin = state.position[2] - self._config.hover_height
                 if hover_margin < 0.15:
                     recover = float(np.clip((hover_margin + 0.15) / 0.15, 0.05, 1.0))
@@ -141,6 +145,80 @@ class FlightController:
         )
         Rd = desired_rotation_from_thrust_direction(b3, yaw)
 
+        return ControlCommand(
+            thrust=thrust,
+            moment_body=np.zeros(3),
+            desired_omega_body=np.zeros(3),
+            desired_rotation=Rd,
+            mode=mode,
+        )
+
+    def compute_velocity(
+        self,
+        state: RobotState,
+        velocity_des: np.ndarray,
+        yaw: float,
+        mode: ControlMode,
+    ) -> ControlCommand:
+        """Velocity-only tracking for manual teleop (no position lead or height gating)."""
+        v_des = np.asarray(velocity_des, dtype=float)[:3]
+        ev = state.velocity - v_des
+        mass = self._config.mass
+        g = self._config.gravity
+        kv = self._config.kv
+        kv_z = self._config.kv_z
+
+        bz = float(body_z_world(state.rotation)[2])
+        if bz < 0.0:
+            yaw_now = float(np.arctan2(state.rotation[1, 0], state.rotation[0, 0]))
+            weight = mass * g
+            return ControlCommand(
+                thrust=float(np.clip(1.15 * weight, 0.0, 4.0 * self._config.motor_max * 0.98)),
+                moment_body=np.zeros(3),
+                desired_omega_body=np.zeros(3),
+                desired_rotation=self._orientation.hover_yaw(yaw_now),
+                mode=mode,
+            )
+
+        f_des = np.array(
+            [
+                -kv * ev[0],
+                -kv * ev[1],
+                -kv_z * ev[2] + mass * g,
+            ],
+            dtype=float,
+        )
+
+        min_center_z = self._config.min_flight_center_z
+        if state.position[2] < min_center_z:
+            f_des[2] += mass * 14.0 * (min_center_z - state.position[2])
+
+        max_up = 4.0 * self._config.motor_max * 0.98
+        max_down = 4.0 * abs(self._config.motor_min) * 0.98
+        min_thrust = -max_down if self._config.motor_min < 0.0 else 0.0
+        airborne = (not state.on_ground) or state.position[2] > self._config.ground_height_threshold
+        if airborne and mode != ControlMode.LANDING:
+            min_thrust = max(min_thrust, self._config.min_airborne_thrust_fraction * mass * g)
+
+        a_xy = f_des[:2].copy()
+        vertical_force = f_des[2]
+        tilt_limit = self.MAX_TILT_SINE * mass * g
+        xy_norm = np.linalg.norm(a_xy)
+        if xy_norm > tilt_limit:
+            a_xy = a_xy * (tilt_limit / xy_norm)
+
+        b3_xy = a_xy / (mass * g)
+        b3_z = float(np.sqrt(max(1.0 - np.dot(b3_xy, b3_xy), self.MIN_B3_Z**2)))
+        b3 = np.array([b3_xy[0], b3_xy[1], b3_z], dtype=float)
+        b3 /= np.linalg.norm(b3)
+
+        b_z = body_z_world(state.rotation)
+        thrust = float(np.dot(f_des, b_z))
+        if thrust < min_thrust and vertical_force > 0.0:
+            thrust = vertical_force / max(float(b_z[2]), self.MIN_B3_Z)
+        thrust = float(np.clip(thrust, min_thrust, max_up))
+
+        Rd = desired_rotation_from_thrust_direction(b3, yaw)
         return ControlCommand(
             thrust=thrust,
             moment_body=np.zeros(3),

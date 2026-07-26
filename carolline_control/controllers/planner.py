@@ -29,6 +29,8 @@ class Planner:
         self._mission_done = False
         self._segment_start: np.ndarray | None = None
         self._flight_yaw = float(config.mission_yaw)
+        self._dwelling = False
+        self._dwell_timer = 0.0
 
     def set_flight_yaw(self, yaw: float) -> None:
         self._flight_yaw = float(yaw)
@@ -49,6 +51,8 @@ class Planner:
         self._segment_start = None
         self._flight_yaw = float(self._config.mission_yaw)
         self._waypoints = [wp.copy() for wp in self._mission_waypoints]
+        self._dwelling = False
+        self._dwell_timer = 0.0
 
     def begin_flight(self, state: RobotState, yaw: float | None = None) -> None:
         """Snapshot the first segment start when FLIGHT mode begins."""
@@ -97,17 +101,44 @@ class Planner:
         else:
             self._mission_done = True
 
+    def _hold_at_waypoint(self, waypoint: np.ndarray) -> TrajectoryTarget:
+        """Zero-velocity hold reference while dwelling at a reached waypoint."""
+        position = waypoint.copy()
+        position[2] = self._config.hover_height
+        return TrajectoryTarget(
+            position=position,
+            velocity=np.zeros(3),
+            acceleration=np.zeros(3),
+            yaw=self._flight_yaw,
+        )
+
     def update(self, state: RobotState, dt: float) -> TrajectoryTarget:
         """Advance planner and return current target."""
-        self._segment_time += dt
         p1 = self._current_segment_end()
-        dist_xy = float(np.linalg.norm(state.position[:2] - p1[:2]))
         tol = self._config.waypoint_reach_tolerance
+        dist_xy = float(np.linalg.norm(state.position[:2] - p1[:2]))
         speed_xy = float(np.linalg.norm(state.velocity[:2]))
-        max_dwell = self._segment_duration * 2.5
         at_goal = dist_xy < tol and speed_xy < 0.3
-        if (at_goal and self._segment_time >= 0.5) or self._segment_time >= max_dwell:
+
+        if self._dwelling:
+            self._dwell_timer += dt
+            hold = self._hold_at_waypoint(p1)
+            if self._dwell_timer >= self._config.waypoint_dwell_time:
+                self._dwelling = False
+                self._dwell_timer = 0.0
+                self._advance_segment()
+                self._segment_time = 0.0
+            return hold
+
+        self._segment_time += dt
+        max_dwell = self._segment_duration * 2.5
+        if at_goal and self._config.waypoint_dwell_time > 0.0:
+            self._dwelling = True
+            self._dwell_timer = 0.0
+            return self._hold_at_waypoint(p1)
+        if self._segment_time >= max_dwell:
             self._advance_segment()
+            self._segment_time = 0.0
 
         p0 = self._current_segment_start()
         p1 = self._current_segment_end()
@@ -137,6 +168,13 @@ class Planner:
         if dist <= tol:
             return np.zeros(2)
 
+        if dist < 3.0 * tol:
+            speed_cap = self._config.rolling_max_speed * float(
+                np.clip((dist - tol) / max(2.0 * tol, 1e-6), 0.15, 1.0)
+            )
+        else:
+            speed_cap = self._config.rolling_max_speed
+
         # Eq. (15) already closes the angular-rate loop. Subtracting measured
         # velocity here double-damps the cascade and wastes motor authority.
         braking_distance = max(self._config.rolling_braking_distance, 3.0 * tol)
@@ -147,7 +185,7 @@ class Planner:
                 1.0,
             )
         )
-        return (err / dist) * self._config.rolling_max_speed * taper
+        return (err / dist) * speed_cap * taper
 
     def rolling_target_position(self, state: RobotState) -> np.ndarray:
         """World-frame roll goal used for logging and targets."""

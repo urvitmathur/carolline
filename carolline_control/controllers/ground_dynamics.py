@@ -214,3 +214,46 @@ class GroundDynamics:
             saturated=scale > 1.0 + 1e-9,
             q_matrix=q_matrix,
         )
+
+    def apply_collective_thrust(
+        self,
+        state: RobotState,
+        allocation: GroundAllocation,
+        total_thrust: float,
+    ) -> GroundAllocation:
+        """Add near-null-space collective thrust without changing contact torque much."""
+        q_matrix = allocation.q_matrix
+        thrust = np.asarray(allocation.motor.thrusts, dtype=float).copy()
+        if total_thrust <= 1e-6:
+            return allocation
+
+        _, _, vh = np.linalg.svd(q_matrix, full_matrices=True)
+        null_direction = vh[-1]
+        null_collective = float(np.sum(null_direction))
+        if abs(null_collective) < 1e-8:
+            return allocation
+
+        _, _, normal_world = self.contact_geometry(state)
+        body_z_world = state.rotation[:, 2]
+        normal_per_collective = float(np.dot(body_z_world, normal_world))
+        max_unload = (
+            self.config.ground_max_unload_fraction
+            * self.config.mass
+            * self.config.gravity
+            * max(float(normal_world[2]), 0.0)
+        )
+        if normal_per_collective > 1e-6:
+            max_total = max_unload / normal_per_collective
+            total_thrust = min(float(total_thrust), max_total)
+
+        thrust += (total_thrust / null_collective) * null_direction
+        thrust = np.clip(thrust, self.config.motor_min, self.config.motor_max)
+        achieved = q_matrix @ thrust
+        return GroundAllocation(
+            motor=MotorCommand(thrusts=thrust),
+            requested_torque=allocation.requested_torque.copy(),
+            achieved_torque=achieved,
+            allocation_scale=allocation.allocation_scale,
+            saturated=allocation.saturated,
+            q_matrix=q_matrix,
+        )

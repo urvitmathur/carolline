@@ -45,11 +45,6 @@ def plot_actual_vs_desired(
         desired = actual.copy()
 
     labels = ("X [m]", "Y [m]", "Z [m]")
-    flight_idx = next((i for i, row in enumerate(rows) if row["mode"] == "FLIGHT"), 0)
-    if flight_idx > 0:
-        time = time[flight_idx:] - time[flight_idx]
-        actual = actual[flight_idx:]
-        desired = desired[flight_idx:]
 
     fig, axes = plt.subplots(3, 1, figsize=(8.5, 7.0), sharex=True, constrained_layout=True)
     fig.suptitle(title, fontsize=12, fontweight="bold")
@@ -66,6 +61,24 @@ def plot_actual_vs_desired(
 
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
+
+    flight_idx = next((i for i, row in enumerate(rows) if row["mode"] == "FLIGHT"), None)
+    if flight_idx is not None:
+        flight_path = output_path.parent / "flight_tracking.png"
+        ft = time[flight_idx:] - time[flight_idx]
+        fig_f, axes_f = plt.subplots(3, 1, figsize=(8.5, 7.0), sharex=True, constrained_layout=True)
+        fig_f.suptitle("Flight Phase Tracking", fontsize=12, fontweight="bold")
+        for idx, (ax, label) in enumerate(zip(axes_f, labels)):
+            ax.plot(ft, desired[flight_idx:, idx], color="#1f77b4", linewidth=1.8, label="Desired")
+            ax.plot(ft, actual[flight_idx:, idx], color="#d62728", linewidth=1.2, linestyle="--", label="Actual")
+            ax.set_ylabel(label)
+            ax.grid(True, alpha=0.3)
+            if idx == 0:
+                ax.legend(loc="upper right", framealpha=0.9)
+            if idx == 2:
+                ax.set_xlabel("Time [s]")
+        fig_f.savefig(flight_path, dpi=160)
+        plt.close(fig_f)
 
     rolling_rows = [r for r in rows if r["mode"] == "ROLLING"]
     if rolling_rows:

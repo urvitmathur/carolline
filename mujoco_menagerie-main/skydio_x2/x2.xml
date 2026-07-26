@@ -16,6 +16,11 @@
           <geom type="ellipsoid" size=".13 .13 .01"/>
         </default>
       </default>
+      <default class="cage_rib">
+        <geom type="capsule" size="0.0065" mass="0"
+              contype="0" conaffinity="0"
+              rgba="0.95 0.92 0.45 1"/>
+      </default>
       <site group="5"/>
     </default>
   </default>
@@ -51,9 +56,8 @@
       <site name="thrust4" pos=".14 -.18 .08"/>
     <body name="protective_cage" pos="0 0 0">
         <inertial pos="0 0 0" mass="0.80" diaginertia="0.043 0.043 0.043"/>
-        <geom name="cage_collision" type="sphere" size="0.40" rgba="1 1 0 0.15" contype="1" conaffinity="1" condim="6" friction="0.9 0.02 0.01" solref="0.015 1" solimp="0.95 0.99 0.001"/>
-        
-      
+        <geom name="cage_collision" type="sphere" size="0.40" rgba="0.95 0.92 0.45 0.15" contype="1" conaffinity="1" condim="6" friction="0.9 0.02 0.01" solref="0.015 1" solimp="0.95 0.99 0.001"/>
+        <include file="cage_ribs.xml"/>
     </body>
 
     </body>

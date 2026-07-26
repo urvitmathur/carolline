@@ -132,6 +132,7 @@ class ControllerConfig:
     ground_height_threshold: float
     hover_altitude_tolerance: float
     hover_velocity_tolerance: float
+    takeoff_horizontal_velocity_tolerance: float
     min_airborne_thrust_fraction: float
     landing_settle_time: float
     pre_takeoff_thrust_fraction: float
@@ -141,6 +142,7 @@ class ControllerConfig:
     motor_slew_rate: float
     roll_target: np.ndarray
     roll_position_tolerance: float
+    roll_arrival_speed: float
     spawn_xy: np.ndarray
     leg_distance: float
     segment_duration: float
@@ -153,6 +155,8 @@ class ControllerConfig:
     ground_pseudoinverse_damping: float
     pre_takeoff_omega_gain: float
     pre_takeoff_omega_limit: float
+    pre_takeoff_omega_kp: np.ndarray
+    pre_upright_settle_time: float
     contact_min_normal_z: float
     contact_force_threshold: float
     contact_loss_grace: float
@@ -164,3 +168,9 @@ class ControllerConfig:
     mission_yaw: float = 0.0
     min_flight_center_z: float = 0.72
     waypoint_reach_tolerance: float = 0.15
+    waypoint_dwell_time: float = 3.0
+    hover_before_flight_time: float = 5.0
+    esc_mapping_enabled: bool = True
+    esc_thrust_forward_max: float = 13.0
+    esc_thrust_reverse_max: float = 10.0
+    esc_reverse_efficiency: float = 0.72

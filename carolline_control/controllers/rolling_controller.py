@@ -31,15 +31,36 @@ class RollingController:
         yaw: float,
         dt: float,
         yaw_rate: float = 0.0,
+        hold: bool = False,
     ) -> ControlCommand:
-        """Map inertial velocity to omega_d and contact torque."""
-        _ = yaw, yaw_rate, dt
+        """Map inertial velocity to omega_d and contact torque.
+
+        When hold is False and desired velocity is zero, motors are off so the
+        cage coasts under gravity and contact friction (pure physics).
+        A non-zero yaw_rate still activates the controller for in-place spin
+        about the ground contact normal.
+        """
+        _ = yaw, dt
         velocity = np.asarray(desired_velocity_xy, dtype=float).copy()
         speed = float(np.linalg.norm(velocity))
         if speed > self._config.rolling_max_speed:
             velocity *= self._config.rolling_max_speed / speed
 
+        active = hold or speed >= 1e-3 or abs(yaw_rate) >= 1e-3
+        if not active:
+            return ControlCommand(
+                thrust=0.0,
+                moment_body=np.zeros(3),
+                desired_omega_body=np.zeros(3),
+                desired_rotation=state.rotation.copy(),
+                mode=ControlMode.ROLLING,
+            )
+
         omega_body = self.dynamics.desired_omega(state, velocity)
+        if abs(yaw_rate) >= 1e-3:
+            _, _, normal_world = self.dynamics.contact_geometry(state)
+            normal_body = state.rotation.T @ normal_world
+            omega_body = omega_body + float(yaw_rate) * normal_body
         torque_body = self.dynamics.tracking_torque(
             state,
             omega_body,

@@ -44,10 +44,15 @@ class PreTakeoffController:
         omega_des = self._config.pre_takeoff_omega_gain * rot_log(
             state.rotation.T @ Rd
         )
+        omega_des -= 0.85 * np.asarray(state.omega_body, dtype=float)
         omega_norm = float(np.linalg.norm(omega_des))
         if omega_norm > self._config.pre_takeoff_omega_limit:
             omega_des *= self._config.pre_takeoff_omega_limit / omega_norm
-        torque = self.dynamics.tracking_torque(state, omega_des)
+        torque = self.dynamics.tracking_torque(
+            state,
+            omega_des,
+            omega_kp=self._config.pre_takeoff_omega_kp,
+        )
 
         return ControlCommand(
             thrust=0.0,
