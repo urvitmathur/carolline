@@ -31,10 +31,11 @@ if str(REPO_ROOT) not in sys.path:
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config, load_raw_config
 from carolline_control.controllers.state_estimator import StateEstimator
+from carolline_control.sim.viewer_loop import tune_viewer_for_speed
 from carolline_control.utils.types import ControlMode, ControllerConfig
 from carolline_control.visualization.markers import compile_model_with_markers
 
-# Movement — arrow keys primary (numpad kept as alternate)
+# Movement — arrow keys (+ numpad); WASD are used by the MuJoCo viewer
 FORWARD_KEYS = {glfw.KEY_UP, glfw.KEY_KP_8}
 BACK_KEYS = {glfw.KEY_DOWN, glfw.KEY_KP_2}
 LEFT_KEYS = {glfw.KEY_LEFT, glfw.KEY_KP_4}
@@ -56,7 +57,7 @@ MODE_KEY_MAP: dict[int, ControlMode] = {
     glfw.KEY_5: ControlMode.HOVER,
     glfw.KEY_6: ControlMode.FLIGHT,
     glfw.KEY_7: ControlMode.LANDING,
-    glfw.KEY_8: ControlMode.IDLE,
+    glfw.KEY_0: ControlMode.IDLE,
 }
 
 HELP_TEXT = """\
@@ -64,10 +65,10 @@ CAROLLINE manual test rig
 
 MODES (tap number key):
   1 ROLLING   2 PRETAKEOFF   3 UPRIGHT   4 TAKEOFF
-  5 HOVER     6 FLIGHT       7 LANDING   8 IDLE (motors off — pure physics)
+  5 HOVER     6 FLIGHT       7 LANDING   0 IDLE (motors off — pure physics)
 
 MOVE (hold — release to stop):
-  Arrow keys     forward / back / left / right
+  Numpad 8/2/4/6  forward / back / left / right (arrow keys match)
   Page Up/Down   up / down (air modes)
   Q / E          spin on axis (rolling) / yaw (air)
   X              stop          R   hold position on slope (gravity comp)
@@ -75,7 +76,7 @@ MOVE (hold — release to stop):
   /              toggle this help
 
 Release movement keys on a ramp to coast back down; press R to actively hold.
-Press 8 (IDLE) to cut all motors — cage falls and rolls under gravity only.
+Press 0 (IDLE) to cut all motors — cage falls and rolls under gravity only.
 """
 
 
@@ -84,6 +85,56 @@ class SceneName(str, Enum):
     RAMP = "ramp"
     COURSE = "course"
     PLATFORM = "platform"
+    TERRAIN = "terrain"
+
+
+def camera_ground_basis(azimuth_deg: float, elevation_deg: float) -> tuple[np.ndarray, np.ndarray]:
+    """Return unit (forward, right) on the ground plane from MuJoCo orbit camera angles.
+
+    Forward is toward the top of the screen (into the scene); right is screen-right.
+    """
+    az = math.radians(azimuth_deg)
+    el = math.radians(elevation_deg)
+    offset_x = math.cos(el) * math.cos(az)
+    offset_y = math.cos(el) * math.sin(az)
+    # Camera sits at lookat + offset; negate for screen-forward (top of viewport).
+    forward = np.array([offset_x, offset_y], dtype=float)
+    norm = float(np.linalg.norm(forward))
+    if norm < 1e-9:
+        forward = np.array([0.0, 1.0], dtype=float)
+    else:
+        forward /= norm
+    # Right-hand tangent on the ground plane (Z up).
+    right = np.array([-forward[1], forward[0]], dtype=float)
+    return forward, right
+
+
+def world_move_direction(vx: int, vy: int, forward_axis: str) -> np.ndarray:
+    """Map screen keys to fixed world axes (camera rotation ignored).
+
+    forward_axis=x  ->  up / back = +/-X, left / right = +/-Y  (ramp scenes)
+    forward_axis=y  ->  up / back = +/-Y, left / right = +/-X  (default flat)
+    """
+    longitudinal = float(vy)
+    if forward_axis == "x":
+        return np.array([longitudinal, float(vx)], dtype=float)
+    lateral = -float(vx)
+    return np.array([lateral, longitudinal], dtype=float)
+
+
+def update_tracking_camera(
+    viewer,
+    position: np.ndarray,
+    *,
+    look_height: float = 0.30,
+    distance: float | None = None,
+) -> None:
+    """Orbit camera that keeps the drone centered in view."""
+    viewer.cam.lookat[0] = float(position[0])
+    viewer.cam.lookat[1] = float(position[1])
+    viewer.cam.lookat[2] = float(position[2]) + look_height
+    if distance is not None:
+        viewer.cam.distance = distance
 
 
 def _apply_teleop_tuning(config: ControllerConfig) -> None:
@@ -126,14 +177,27 @@ def _load_scene(scene: SceneName, config: ControllerConfig) -> tuple[mujoco.MjMo
         )
         layout = MissionLayout.default(config.cage_radius, config.hover_height)
         return compile_hybrid_scene(model_path, layout, config), 0.004
+    if scene == SceneName.TERRAIN:
+        from carolline_control.terrain.scene import apply_terrain_mobility_tuning, compile_terrain_scene, load_terrain_config
+
+        terrain_raw = load_terrain_config()
+        apply_terrain_mobility_tuning(config, terrain_raw)
+        model, _, _ = compile_terrain_scene(
+            REPO_ROOT / "mujoco_menagerie-main/skydio_x2/scene.xml",
+            config=terrain_raw,
+            cage_radius=config.cage_radius,
+        )
+        sim = terrain_raw.get("simulation", {})
+        return model, float(sim.get("timestep", 0.004))
     raise ValueError(f"Unknown scene: {scene}")
 
 
 @dataclass
 class KeyInputState:
-    """Track held keys via repeat timestamps (callback runs on viewer thread)."""
+    """Track held keys from the viewer callback (press + repeat refresh)."""
 
     lock: threading.Lock = field(default_factory=threading.Lock)
+    pressed: set[int] = field(default_factory=set)
     key_times: dict[int, float] = field(default_factory=dict)
     pending_mode: ControlMode | None = None
     pending_speed_down: bool = False
@@ -141,7 +205,8 @@ class KeyInputState:
     pending_toggle_help: bool = False
     roll_hold: bool = False
     last_label: str = "-"
-    hold_timeout: float = 0.28
+    # Must exceed OS key-repeat initial delay (~500 ms on Windows).
+    hold_timeout: float = 2.0
 
     def on_key(self, keycode: int) -> None:
         now = time.perf_counter()
@@ -172,6 +237,7 @@ class KeyInputState:
                 self.pending_toggle_help = True
                 return
             if keycode in ALL_MOVE_KEYS:
+                self.pressed.add(keycode)
                 self.key_times[keycode] = now
                 self.roll_hold = False
                 if keycode in FORWARD_KEYS:
@@ -192,19 +258,28 @@ class KeyInputState:
                     self.last_label = "yaw+"
 
     def _clear_move_keys_unlocked(self) -> None:
+        self.pressed = {k for k in self.pressed if k not in ALL_MOVE_KEYS}
         for key in list(self.key_times.keys()):
             if key in ALL_MOVE_KEYS:
                 del self.key_times[key]
 
     def _active(self, keys: set[int]) -> bool:
         now = time.perf_counter()
-        return any(now - self.key_times.get(k, 0.0) < self.hold_timeout for k in keys)
+        active = False
+        for key in keys:
+            if key not in self.pressed:
+                continue
+            if now - self.key_times.get(key, 0.0) < self.hold_timeout:
+                active = True
+            else:
+                self.pressed.discard(key)
+        return active
 
     def direction(self) -> tuple[int, int, int, int, bool]:
         with self.lock:
             if self.roll_hold:
                 return 0, 0, 0, 0, True
-            vx = -1 if self._active(LEFT_KEYS) else (1 if self._active(RIGHT_KEYS) else 0)
+            vx = 1 if self._active(LEFT_KEYS) else (-1 if self._active(RIGHT_KEYS) else 0)
             vy = 1 if self._active(FORWARD_KEYS) else (-1 if self._active(BACK_KEYS) else 0)
             vz = 1 if self._active(UP_KEYS) else (-1 if self._active(DOWN_KEYS) else 0)
             yaw = 1 if self._active(YAW_RIGHT_KEYS) else (-1 if self._active(YAW_LEFT_KEYS) else 0)
@@ -226,6 +301,19 @@ class KeyInputState:
         with self.lock:
             self._clear_move_keys_unlocked()
             self.roll_hold = False
+
+    def release_stale(self) -> None:
+        """Drop keys that stopped repeating (viewer does not send key-up events)."""
+        now = time.perf_counter()
+        with self.lock:
+            stale = [
+                key
+                for key in self.pressed
+                if key in ALL_MOVE_KEYS and now - self.key_times.get(key, 0.0) >= self.hold_timeout
+            ]
+            for key in stale:
+                self.pressed.discard(key)
+                self.key_times.pop(key, None)
 
 
 @dataclass
@@ -270,13 +358,21 @@ class TeleopState:
         roll_hold: bool,
         dt: float,
         rolling_max_speed: float,
+        move_basis: tuple[np.ndarray, np.ndarray] | None = None,
+        world_direction: np.ndarray | None = None,
     ) -> None:
         if roll_hold or self.mode in (ControlMode.PRETAKEOFF, ControlMode.UPRIGHT, ControlMode.IDLE):
             target_xy = np.zeros(2)
             target_z = 0.0
             target_yaw = 0.0
         else:
-            direction = np.array([float(vx), float(vy)])
+            if world_direction is not None:
+                direction = np.asarray(world_direction, dtype=float)
+            elif move_basis is not None and (vx != 0 or vy != 0):
+                forward, right = move_basis
+                direction = forward * float(vy) + right * float(vx)
+            else:
+                direction = np.array([float(vx), float(vy)], dtype=float)
             max_xy = self.ground_speed * self.speed_scale
             if self.mode in (ControlMode.FLIGHT, ControlMode.HOVER, ControlMode.LANDING):
                 max_xy = self.air_xy_speed * self.speed_scale
@@ -315,7 +411,9 @@ def _random_ground_qpos(spawn_xy: list[float], ground_z: float) -> list[float]:
     ]
 
 
-def _settle(model: mujoco.MjModel, data: mujoco.MjData, steps: int = 600) -> None:
+def _settle(model: mujoco.MjModel, data: mujoco.MjData, steps: int = 80) -> None:
+    """Short passive settle so the cage rests on contacts without long tumbling."""
+    data.ctrl[:] = 0.0
     for _ in range(steps):
         mujoco.mj_step(model, data)
 
@@ -355,9 +453,29 @@ def main() -> None:
     parser.add_argument("--config", default=str(REPO_ROOT / "carolline_control" / "config.yaml"))
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--scene", choices=[s.value for s in SceneName], default=SceneName.FLAT.value)
-    parser.add_argument("--substeps", type=int, default=20, help="Physics steps per frame (default 20)")
+    parser.add_argument("--substeps", type=int, default=8, help="Physics steps per frame (default 8)")
+    parser.add_argument("--target-fps", type=float, default=30.0, help="Target viewer refresh rate")
     parser.add_argument("--realtime", action="store_true", help="Cap sim to wall clock")
+    parser.add_argument(
+        "--spawn-upright",
+        action="store_true",
+        help="Spawn in a stable side-roll attitude instead of random tilt",
+    )
+    parser.add_argument(
+        "--world-frame",
+        action="store_true",
+        help="Arrow keys use fixed world directions (ignore camera rotation)",
+    )
+    parser.add_argument(
+        "--forward-axis",
+        choices=("x", "y"),
+        default=None,
+        help="World axis for forward key: x=up-ramp (+X), y=+Y (default: x for ramp scene, else y)",
+    )
     args = parser.parse_args()
+
+    if args.forward_axis is None:
+        args.forward_axis = "x" if args.scene == SceneName.RAMP.value else "y"
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -379,7 +497,18 @@ def main() -> None:
     controller = CarollineController(config)
 
     ground_z = float(raw.get("ground_z", 0.40))
-    if raw.get("random_initial_orientation", True):
+    if args.spawn_upright:
+        half = math.radians(55.0) * 0.5
+        qpos = [
+            float(config.spawn_xy[0]),
+            float(config.spawn_xy[1]),
+            ground_z,
+            float(math.cos(half)),
+            0.0,
+            float(math.sin(half)),
+            0.0,
+        ]
+    elif raw.get("random_initial_orientation", True):
         qpos = _random_ground_qpos(list(config.spawn_xy), ground_z)
     else:
         qpos = raw.get("initial_qpos")
@@ -393,18 +522,34 @@ def main() -> None:
     substeps = max(1, args.substeps)
     keys = KeyInputState()
     teleop = TeleopState(mode=ControlMode.ROLLING, ground_speed=config.rolling_max_speed)
+    if args.scene == SceneName.TERRAIN.value:
+        from carolline_control.terrain.scene import load_terrain_config
+
+        mob = load_terrain_config().get("mobility", {})
+        teleop.ground_speed = float(mob.get("teleop_ground_speed", config.rolling_max_speed))
+        teleop.vel_time_constant = float(mob.get("teleop_time_constant", 0.030))
     last_mode = teleop.mode.name
 
     print(HELP_TEXT)
-    print("Hold arrow keys to move. Release to stop. 1=rolling 6=flight.")
+    if args.world_frame:
+        axis_label = "+X" if args.forward_axis == "x" else "+Y"
+        print(
+            f"World-frame teleop: forward={axis_label}, rotating the view does not change direction."
+        )
+    else:
+        print("Camera-relative teleop: arrow forward follows the screen (view rotation changes direction).")
+    print("Press / for help. 0=IDLE. X=stop.")
 
     def on_key(keycode: int) -> None:
         keys.on_key(keycode)
 
+    track_distance = 6.0
     with mujoco.viewer.launch_passive(model, data, key_callback=on_key) as viewer:
-        viewer.cam.distance = 6.0
+        tune_viewer_for_speed(viewer)
+        viewer.cam.distance = track_distance
         viewer.cam.azimuth = 130.0
         viewer.cam.elevation = -20.0
+        update_tracking_camera(viewer, data.qpos[:3], look_height=0.30, distance=track_distance)
         wall_t0 = time.perf_counter()
         sim_t0 = data.time
 
@@ -421,6 +566,9 @@ def main() -> None:
                     state = estimator.estimate(data)
                     controller._hover_anchor_xy = state.position[:2].copy()
                     controller._flight_yaw = float(np.arctan2(state.rotation[1, 0], state.rotation[0, 0]))
+                if pending_mode == ControlMode.ROLLING:
+                    controller.rolling.reset()
+                    controller.mode_manager.request_roll_hold(False)
                 teleop.mode = pending_mode
             if speed_down:
                 teleop.speed_scale = max(0.3, teleop.speed_scale * 0.85)
@@ -429,38 +577,79 @@ def main() -> None:
             if toggle_help:
                 teleop.show_help = not teleop.show_help
 
+            keys.release_stale()
             vx, vy, vz, yaw, roll_hold = keys.direction()
+            move_basis: tuple[np.ndarray, np.ndarray] | None = None
+            world_dir: np.ndarray | None = None
+            if vx != 0 or vy != 0:
+                if args.world_frame:
+                    world_dir = world_move_direction(vx, vy, args.forward_axis)
+                else:
+                    move_basis = camera_ground_basis(viewer.cam.azimuth, viewer.cam.elevation)
             frame_dt = dt * substeps
-            teleop.update(vx, vy, vz, yaw, roll_hold, frame_dt, config.rolling_max_speed)
+            frame_start = time.perf_counter()
+            teleop.update(
+                vx,
+                vy,
+                vz,
+                yaw,
+                roll_hold,
+                frame_dt,
+                config.rolling_max_speed,
+                move_basis=move_basis,
+                world_direction=world_dir,
+            )
 
-            for _ in range(substeps):
-                mode = _sim_step(controller, estimator, teleop, model, data, dt)
+            for sub_i in range(substeps):
+                if sub_i == 0:
+                    mode = _sim_step(controller, estimator, teleop, model, data, frame_dt)
+                else:
+                    mujoco.mj_step(model, data)
                 if mode.name != last_mode:
                     print(f"t={data.time:6.2f}s  {last_mode} -> {mode.name}")
                     last_mode = mode.name
 
+            state = estimator.estimate(data)
+            update_tracking_camera(viewer, state.position, look_height=0.30)
+            motors = np.asarray(data.ctrl, dtype=float)
+            status = (
+                f"Mode: {teleop.mode.name}  input: {keys.last_label}  "
+                f"cmd [{teleop.velocity_xy[0]:+.2f},{teleop.velocity_xy[1]:+.2f}] m/s  "
+                f"on_ground={state.on_ground}  contact={state.contact_valid}  "
+                f"motors [{motors[0]:+.1f},{motors[1]:+.1f},{motors[2]:+.1f},{motors[3]:+.1f}] N"
+            )
             if teleop.show_help:
-                vx, vy, vz, yaw, hold = keys.direction()
-                state = estimator.estimate(data)
                 viewer.set_texts(
                     (
                         int(mujoco.mjtFontScale.mjFONTSCALE_150),
                         int(mujoco.mjtGridPos.mjGRID_TOPLEFT),
-                        HELP_TEXT + f"\n\nMode: {teleop.mode.name}  hold: {keys.last_label}\n"
-                        f"cmd [{teleop.velocity_xy[0]:+.1f},{teleop.velocity_xy[1]:+.1f}] "
-                        f"z={teleop.velocity_world[2]:+.1f}  pos z={state.position[2]:.2f}",
+                        HELP_TEXT + f"\n\n{status}\n"
+                        f"pos=({state.position[0]:.2f},{state.position[1]:.2f},{state.position[2]:.2f})  "
+                        f"speed={float(np.linalg.norm(state.velocity[:2])):.2f} m/s",
                         "",
                     )
                 )
             else:
-                viewer.clear_texts()
+                viewer.set_texts(
+                    (
+                        int(mujoco.mjtFontScale.mjFONTSCALE_150),
+                        int(mujoco.mjtGridPos.mjGRID_BOTTOMLEFT),
+                        status,
+                        "",
+                    )
+                )
 
-            viewer.sync()
+            viewer.sync(state_only=True)
 
             if args.realtime:
                 delay = (data.time - sim_t0) - (time.perf_counter() - wall_t0)
                 if delay > 0.0:
                     time.sleep(min(delay, 0.02))
+            else:
+                elapsed = time.perf_counter() - frame_start
+                sleep_s = (1.0 / max(args.target_fps, 1.0)) - elapsed
+                if sleep_s > 0.0:
+                    time.sleep(sleep_s)
 
     print(f"Done. Final mode: {controller.mode_manager.mode.name}")
 

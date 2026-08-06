@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import csv
+import time
 from pathlib import Path
 
 import numpy as np
+
+from carolline_control.logging.paths import fallback_log_path
 
 from carolline_control.utils.types import (
     ControlCommand,
@@ -73,11 +76,49 @@ class Logger:
     ]
 
     def __init__(self, path: str | Path) -> None:
-        self._path = Path(path)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = self._path.open("w", newline="", encoding="utf-8")
+        self._path, self._file = self._open_log_file(Path(path))
         self._writer = csv.writer(self._file)
         self._writer.writerow(self.HEADER)
+
+    @staticmethod
+    def _open_log_file(path: Path) -> tuple[Path, object]:
+        """Open a CSV log file, with retry and timestamped fallback on Windows locks."""
+        path = path.resolve()
+        if path.exists() and path.is_dir():
+            raise NotADirectoryError(
+                f"Log path is a directory, not a file: {path}. "
+                "Remove or rename it and retry."
+            )
+
+        candidates = [path, fallback_log_path(path)]
+        last_error: OSError | None = None
+        for attempt, candidate in enumerate(candidates):
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            for retry in range(3):
+                try:
+                    handle = candidate.open("w", newline="", encoding="utf-8")
+                    if candidate != path:
+                        hint = (
+                            f" (close Excel/other programs using {path})"
+                            if last_error is not None
+                            else ""
+                        )
+                        print(
+                            f"Warning: could not open log file {path}: {last_error}; "
+                            f"using {candidate}{hint}"
+                        )
+                    return candidate, handle
+                except OSError as exc:
+                    last_error = exc
+                    if retry < 2:
+                        time.sleep(0.05)
+            if attempt == 0:
+                continue
+        raise OSError(
+            f"Could not open log file {path} or fallback {candidates[1]}: {last_error}. "
+            "Close any program that has the CSV open (Excel, viewer) and retry, "
+            "or pass --log path/to/other.csv"
+        ) from last_error
 
     def log(
         self,

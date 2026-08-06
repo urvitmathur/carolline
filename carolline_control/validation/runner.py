@@ -33,9 +33,16 @@ class RunResult:
 class ValidationRunner:
     """Runs one Monte Carlo simulation without modifying controller internals."""
 
-    def __init__(self, val_cfg: ValidationConfig, repo_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        val_cfg: ValidationConfig,
+        repo_root: Path | None = None,
+        *,
+        sensor_only: bool = False,
+    ) -> None:
         self.val_cfg = val_cfg
         self.repo_root = repo_root or Path(__file__).resolve().parents[2]
+        self.sensor_only = sensor_only
         ctrl_path = self.repo_root / val_cfg.controller_config
         self.raw_config = load_raw_config(ctrl_path)
         self.base_config = load_config(ctrl_path)
@@ -58,7 +65,7 @@ class ValidationRunner:
         apply_model_perturbations(model, run_params)
         data = mujoco.MjData(model)
 
-        base_estimator = StateEstimator(model, config)
+        base_estimator = StateEstimator(model, config, sensor_only=self.sensor_only)
         base_estimator.fill_inertial_params(config)
         estimator: StateEstimator | NoisyStateEstimator = base_estimator
         if any(
@@ -93,6 +100,8 @@ class ValidationRunner:
         data.qpos[:7] = np.asarray(run_params.initial_qpos, dtype=float)
         data.qvel[:] = np.asarray(run_params.initial_qvel, dtype=float)
         mujoco.mj_forward(model, data)
+        if self.sensor_only:
+            base_estimator.reset(data.qpos[:3].copy())
 
         duration = float(self.val_cfg.sim_duration)
         base_dt = float(model.opt.timestep)

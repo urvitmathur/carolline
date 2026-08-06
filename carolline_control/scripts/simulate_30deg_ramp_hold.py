@@ -27,6 +27,8 @@ if str(REPO_ROOT) not in sys.path:
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config
 from carolline_control.controllers.state_estimator import StateEstimator
+from carolline_control.scripts.manual_teleop import update_tracking_camera
+from carolline_control.sim.viewer_loop import run_passive_viewer_loop, tune_viewer_for_speed
 from carolline_control.utils.types import ControlMode
 
 ROLLING_RAMP_CONFIG = REPO_ROOT / "carolline_control" / "rolling_ramp_config.yaml"
@@ -149,6 +151,8 @@ def main() -> None:
     )
     parser.add_argument("--duration", type=float, default=60.0)
     parser.add_argument("--no-viewer", action="store_true")
+    parser.add_argument("--substeps", type=int, default=8)
+    parser.add_argument("--target-fps", type=float, default=30.0)
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -183,12 +187,13 @@ def main() -> None:
     print(f"  target center: [{target[0]:.2f}, {target[1]:.2f}, {target[2]:.2f}] m")
     print(f"  expected normal: {expected_normal}")
 
-    def control_step() -> None:
+    def control_step(*, step_dt: float | None = None) -> None:
         nonlocal hold_time, hold_announced
+        use_dt = dt if step_dt is None else step_dt
         state = estimator.estimate(data)
         distance = float(np.linalg.norm(state.position[:2] - target[:2]))
         controller.mode_manager.request_roll_hold(distance < 0.80)
-        motor, _, mode, _ = controller.compute(state, dt)
+        motor, _, mode, _ = controller.compute(state, use_dt)
         diagnostics = controller.last_diagnostics
         data.ctrl[:] = motor.thrusts
 
@@ -225,17 +230,26 @@ def main() -> None:
         angle = np.radians(ramp_params["angle_deg"])
         ramp_mid_x = ramp_params["flat_start"] + 0.5 * ramp_params["ramp_length"] * np.cos(angle)
         with mujoco.viewer.launch_passive(model, data) as viewer:
-            viewer.cam.lookat[:] = [ramp_mid_x, 0.0, 1.0]
-            viewer.cam.distance = 8.0
+            tune_viewer_for_speed(viewer)
             viewer.cam.azimuth = 115.0
             viewer.cam.elevation = -18.0
-            while viewer.is_running() and data.time < args.duration:
-                control_step()
+            track_distance = 8.0
+            update_tracking_camera(viewer, data.qpos[:3], look_height=0.35, distance=track_distance)
+
+            frame_dt = dt * max(1, args.substeps)
+
+            def on_frame(v, _data: mujoco.MjData) -> None:
+                update_tracking_camera(
+                    v,
+                    _data.qpos[:3],
+                    look_height=0.35,
+                    distance=track_distance,
+                )
                 normal = np.asarray(telemetry["normal"])
                 requested = np.asarray(telemetry["requested"])
                 achieved = np.asarray(telemetry["achieved"])
                 motors = np.asarray(telemetry["motors"])
-                viewer.set_texts(
+                v.set_texts(
                     (
                         int(mujoco.mjtFontScale.mjFONTSCALE_150),
                         int(mujoco.mjtGridPos.mjGRID_TOPLEFT),
@@ -262,8 +276,22 @@ def main() -> None:
                         ),
                     )
                 )
-                mujoco.mj_step(model, data)
-                viewer.sync()
+
+            def step_fn() -> bool:
+                control_step(step_dt=frame_dt)
+                return True
+
+            run_passive_viewer_loop(
+                viewer,
+                model,
+                data,
+                step_fn,
+                substeps=max(1, args.substeps),
+                target_fps=args.target_fps,
+                sync_state_only=True,
+                on_frame=on_frame,
+                should_continue=lambda: data.time < args.duration,
+            )
 
     final_state = estimator.estimate(data)
     print(

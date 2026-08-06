@@ -1,0 +1,94 @@
+# Rolling SLAM maze (Gazebo-style orthogonal walls)
+# Used by: scripts/simulate_slam_maze.py
+
+model_path: "mujoco_menagerie-main/skydio_x2/scene_cage.xml"
+
+map:
+  width_m: 12.0
+  height_m: 12.0
+  center_xy: [0.0, 0.0]
+  resolution: 0.05
+  # Light inflate so A* hugs free space but cage may still graze walls.
+  inflation_radius: 0.22
+  soft_cost_radius: 0.22
+  cost_weight: 0.0
+  unknown_cost: 0.15
+  log_odds_hit: 1.05
+  log_odds_miss: -0.32
+  free_log_odds: -0.30
+  occupied_log_odds: 0.85
+  min_hit_range: 0.24
+
+localization:
+  search_xy: 0.30
+  search_yaw_deg: 15.0
+  xy_step: 0.06
+  yaw_step_deg: 3.0
+  update_interval_steps: 6
+
+odometry:
+  process_noise: 0.015
+  initial_covariance: 0.04
+
+planning:
+  replan_interval_s: 3.0
+  min_waypoint_spacing: 0.30
+
+maze:
+  arena_half: 4.5
+  wall_height: 0.55
+  wall_thickness: 0.08
+  entrance_side: north
+  entrance_width: 1.8
+  entrance_offset: -2.6
+  # Fallback spawn if random sampling fails; goal is fixed.
+  spawn: [0.0, 3.0]
+  goal: [3.0, -3.0]
+  random_spawn: false
+  spawn_clearance: 0.55
+  min_goal_dist: 2.8
+  segments:
+    - {x: 0.2, y: 1.6, half_x: 1.6, half_y: 0.08}
+    - {x: -0.2, y: 0.2, half_x: 0.08, half_y: 1.0}
+    - {x: 0.4, y: -1.2, half_x: 1.2, half_y: 0.08}
+    - {x: 1.6, y: 0.0, half_x: 0.08, half_y: 1.0}
+    - {x: -1.2, y: -2.6, half_x: 1.2, half_y: 0.08}
+
+rolling:
+  patrol_speed: 1.55
+  goal_radius: 0.30
+  stop_distance: 0.25
+  arrival_radius: 0.40
+  slowdown_radius: 0.85
+  lookahead_m: 1.00
+  stuck_time: 3.5
+
+mobility:
+  rolling_max_speed: 1.90
+  rolling_kp: 0.72
+  rolling_kd: 1.05
+  motor_slew_rate: 650.0
+
+perception:
+  max_range: 6.0
+  forward_cone_deg: 80.0
+  dense_rays: true
+  dense_ray_count: 24
+
+terrain:
+  friction: [0.88, 0.010, 0.005]
+
+simulation:
+  timestep: 0.004
+  duration: 240.0
+  settle_steps: 350
+  random_orientation: false
+  viewer_substeps: 12
+  viewer_control_every: 4
+  viewer_sync_state_only: true
+  viewer_keep_textures: true
+  viewer_keep_lights: true
+  viewer_track_distance: 9.0
+  viewer_cam_azimuth: 130.0
+  viewer_cam_elevation: -35.0
+  trajectory_sample_s: 0.12

@@ -26,7 +26,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config, load_raw_config
-from carolline_control.controllers.state_estimator import StateEstimator
+from carolline_control.sim_estimator import (
+    add_sensor_only_argument,
+    build_estimator,
+    print_estimator_mode,
+    seed_estimator_from_sim,
+)
 from carolline_control.utils.types import ControlMode, TrajectoryTarget
 from carolline_control.visualization.markers import compile_model_with_markers
 
@@ -82,14 +87,14 @@ def _run_rolling(
     spawn_xy: list[float],
     ground_z: float,
     warmup_distance: float = 1.0,
+    sensor_only: bool = False,
 ) -> LocomotionResult:
     config = load_config(config_path)
     model = compile_model_with_markers(config.model_path, config)
     data = mujoco.MjData(model)
     dt = float(model.opt.timestep)
 
-    estimator = StateEstimator(model, config)
-    estimator.fill_inertial_params(config)
+    estimator = build_estimator(model, config, sensor_only=sensor_only)
     controller = CarollineController(config)
     controller.mode_manager.mode = ControlMode.ROLLING
     controller.rolling.reset()
@@ -97,6 +102,7 @@ def _run_rolling(
     data.qpos[:7] = np.asarray(_tilted_ground_qpos(spawn_xy, ground_z, tilt_deg=55.0), dtype=float)
     data.qvel[:] = 0.0
     mujoco.mj_forward(model, data)
+    seed_estimator_from_sim(estimator, data)
 
     direction = np.array([1.0, 0.0], dtype=float)
     start_xy = np.array(spawn_xy[:2], dtype=float)
@@ -154,14 +160,14 @@ def _run_flight(
     spawn_xy: list[float],
     cruise_height: float,
     warmup_distance: float = 1.0,
+    sensor_only: bool = False,
 ) -> LocomotionResult:
     config = load_config(config_path)
     model = compile_model_with_markers(config.model_path, config)
     data = mujoco.MjData(model)
     dt = float(model.opt.timestep)
 
-    estimator = StateEstimator(model, config)
-    estimator.fill_inertial_params(config)
+    estimator = build_estimator(model, config, sensor_only=sensor_only)
     controller = CarollineController(config)
     controller.mode_manager.mode = ControlMode.FLIGHT
     controller._flight_yaw = 0.0
@@ -172,6 +178,7 @@ def _run_flight(
     data.qpos[3:7] = np.array([1.0, 0.0, 0.0, 0.0])
     data.qvel[:] = 0.0
     mujoco.mj_forward(model, data)
+    seed_estimator_from_sim(estimator, data)
 
     direction = np.array([1.0, 0.0, 0.0], dtype=float)
     energy = 0.0
@@ -269,6 +276,7 @@ def main() -> None:
         default=1.0,
         help="Flight cruise height [m]",
     )
+    add_sensor_only_argument(parser)
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -278,6 +286,7 @@ def main() -> None:
     ground_z = float(raw.get("ground_z", 0.40))
 
     print("CAROLLINE energy efficiency benchmark (paper Sec. V-C)")
+    print_estimator_mode(sensor_only=args.sensor_only)
     print(f"  speed={args.speed} m/s  distance={args.distance} m  warmup={args.warmup_distance} m")
     print()
 
@@ -288,6 +297,7 @@ def main() -> None:
         spawn_xy=spawn_xy,
         ground_z=ground_z,
         warmup_distance=args.warmup_distance,
+        sensor_only=args.sensor_only,
     )
     flight = _run_flight(
         config_path=config_path,
@@ -296,6 +306,7 @@ def main() -> None:
         spawn_xy=spawn_xy,
         cruise_height=args.cruise_height,
         warmup_distance=args.warmup_distance,
+        sensor_only=args.sensor_only,
     )
 
     print("Results:")

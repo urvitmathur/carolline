@@ -1,0 +1,65 @@
+# Autonomous hybrid navigation course (terrain + internal walls)
+# Used by: scripts/simulate_autonomous_course.py
+
+model_path: "mujoco_menagerie-main/skydio_x2/scene.xml"
+
+# Terrain base (same mixed heightfield as terrain_config.yaml)
+terrain:
+  half_x: 14.0
+  half_y: 14.0
+  max_height: 1.45
+  base_thickness: 0.04
+  nrow: 128
+  ncol: 128
+  flat_x_end: -7.0
+  hills_x_end: 2.0
+  seed: 7
+  friction: [0.88, 0.010, 0.005]
+
+mobility:
+  rolling_max_speed: 3.0
+  patrol_speed: 2.5
+  rolling_kp: 0.88
+  rolling_kd: 1.22
+  rolling_omega_kp: [12.0, 12.0, 4.8]
+  motor_slew_rate: 1400.0
+
+course:
+  spawn: [-10.0, 0.0]
+  checkpoints:
+    - [-6.0, 0.0]
+    - [-2.0, 0.0]
+    - [3.0, 1.0]
+    - [8.0, 0.0]
+  goal: [10.5, 0.0]
+  walls:
+    - {x: -4.0, y: 0.0, length: 0.25, width: 3.0, height: 0.55, yaw_deg: 0.0, leg_index: 1}
+    - {x: 1.5, y: 0.5, length: 0.25, width: 2.5, height: 0.70, yaw_deg: 15.0, leg_index: 2}
+  fly_clearance: 0.90
+  stop_distance: 0.65
+  blocked_confirm_time: 0.30
+  max_roll_height: 0.35
+  patrol_arrival_radius: 0.45
+  patrol_slowdown_radius: 0.50
+  patrol_speed: 2.5
+  goal_arrival_radius: 1.20
+  terrain_fly_min_checkpoint: 3
+  terrain_fly_after_recoveries: 0
+  auto_fly_after_wall_leg: 2
+  hover_height: 1.05
+  pre_wall_offset: 0.55
+  post_wall_offset: 0.65
+
+spawn:
+  random_orientation: false
+  settle_steps: 400
+
+simulation:
+  timestep: 0.004
+  duration: 320.0
+
+perception:
+  max_range: 8.0
+  forward_cone_deg: 60.0
+  num_forward_rays: 7
+  upward_pitch_deg: 35.0

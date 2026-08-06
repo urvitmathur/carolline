@@ -26,6 +26,21 @@ class NoisyStateEstimator:
     def fill_inertial_params(self, config) -> None:
         self._inner.fill_inertial_params(config)
 
+    @property
+    def sensor_only(self) -> bool:
+        return self._inner.sensor_only
+
+    @property
+    def last_oracle_position_error(self) -> float:
+        return self._inner.last_oracle_position_error
+
+    @property
+    def last_oracle_attitude_error(self) -> float:
+        return self._inner.last_oracle_attitude_error
+
+    def reset(self, position: np.ndarray) -> None:
+        self._inner.reset(position)
+
     def estimate(self, data) -> RobotState:
         state = self._inner.estimate(data)
         p = self._params

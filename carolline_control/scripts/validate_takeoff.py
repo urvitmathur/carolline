@@ -33,7 +33,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config, load_raw_config
-from carolline_control.controllers.state_estimator import StateEstimator
+from carolline_control.sim_estimator import (
+    add_sensor_only_argument,
+    build_estimator,
+    print_estimator_mode,
+    seed_estimator_from_sim,
+)
 from carolline_control.utils.so3 import body_z_world, rot_to_euler_zyx
 from carolline_control.utils.types import ControlMode
 from carolline_control.visualization.markers import compile_model_with_markers
@@ -103,14 +108,14 @@ def run_trial(
     hover_hold_s: float,
     start_tilted: bool,
     tilt_range: tuple[float, float],
+    sensor_only: bool = False,
 ) -> TakeoffTrial:
     rng = random.Random(seed)
     np.random.seed(seed)
 
     model = compile_model_with_markers(config.model_path, config)
     data = mujoco.MjData(model)
-    estimator = StateEstimator(model, config)
-    estimator.fill_inertial_params(config)
+    estimator = build_estimator(model, config, sensor_only=sensor_only)
 
     config.initial_mode = ControlMode.PRETAKEOFF
     controller = CarollineController(config)
@@ -127,6 +132,7 @@ def run_trial(
     data.qpos[:7] = np.asarray(qpos, dtype=float)
     data.qvel[:] = 0.0
     mujoco.mj_forward(model, data)
+    seed_estimator_from_sim(estimator, data)
 
     dt = float(model.opt.timestep)
     hover_h = float(config.hover_height)
@@ -366,12 +372,14 @@ def main() -> None:
         "--csv",
         default=str(REPO_ROOT / "carolline_control" / "logs" / "takeoff_validation.csv"),
     )
+    add_sensor_only_argument(parser)
     args = parser.parse_args()
 
     raw = load_raw_config(args.config)
     cfg0 = load_config(args.config)
 
     print("CAROLLINE takeoff validation")
+    print_estimator_mode(sensor_only=args.sensor_only)
     print(f"  model        : {cfg0.model_path}")
     print(f"  trials       : {args.trials}")
     print(f"  hover height : {cfg0.hover_height} m")
@@ -400,6 +408,7 @@ def main() -> None:
             hover_hold_s=args.hover_hold,
             start_tilted=start_tilted,
             tilt_range=(args.tilt_min, args.tilt_max),
+            sensor_only=args.sensor_only,
         )
         results.append(r)
         _print_trial(r)

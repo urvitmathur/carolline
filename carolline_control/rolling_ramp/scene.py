@@ -36,7 +36,7 @@ def _ramp_segments(geometry: RampGeometry, world, friction, rgba, *, direction: 
     yc = geometry.y_center
     w = geometry.width * 0.5
     t = 0.05
-    n = 5
+    n = 3
     seg = geometry.ramp_length / n
     if direction == "up":
         for i in range(n):
@@ -81,11 +81,14 @@ def compile_ramp_scene(
         if geom.name == "floor":
             geom.contype = 0
             geom.conaffinity = 0
+            # Invisible — track boxes sit on the same z=0 plane and z-fight if drawn.
+            geom.rgba = [0.0, 0.0, 0.0, 0.0]
+            geom.group = 3
 
     yc = geometry.y_center
     width = geometry.width
     thickness = 0.05
-    overlap = 0.35
+    overlap = 0.18
     friction = [0.95, 0.012, 0.006]
     rgba_flat = [0.35, 0.45, 0.55, 1]
     rgba_up = [0.45, 0.55, 0.35, 1]
@@ -105,6 +108,28 @@ def compile_ramp_scene(
 
     _ramp_segments(geometry, world, friction, rgba_up, direction="up")
     _ramp_segments(geometry, world, friction, rgba_down, direction="down")
+
+    # Blend flat → ramp and top → ramp-down lips for smoother contact transitions.
+    a = geometry.angle_rad
+    for lip_name, lip_x, lip_z, lip_yaw, lip_rgba in (
+        ("up", geometry.flat_start + 0.04, -thickness * 0.5 + 0.012, -0.5 * a, rgba_up),
+        (
+            "down",
+            geometry.flat_start + geometry.ramp_run + geometry.flat_top - 0.04,
+            geometry.rise - thickness * 0.5 + 0.012,
+            0.5 * a,
+            rgba_down,
+        ),
+    ):
+        _add_segment_box(
+            world,
+            f"track_lip_{lip_name}",
+            [float(lip_x), yc, float(lip_z)],
+            [0.16, width * 0.5, thickness * 0.42],
+            _yaw_quat(lip_yaw),
+            lip_rgba,
+            friction,
+        )
 
     lt = geometry.flat_top + overlap
     x_top = geometry.flat_start + geometry.ramp_run + lt * 0.5
@@ -131,6 +156,18 @@ def compile_ramp_scene(
     )
 
     total_x = geometry.flat_start + 2 * geometry.ramp_run + geometry.flat_top + geometry.flat_end
+    barrier_h = 0.35
+    # End barrier only — no collision behind the green start marker (x=0).
+    _add_segment_box(
+        world,
+        "track_barrier_end",
+        [float(total_x + 0.55), yc, barrier_h * 0.5 - thickness],
+        [0.06, width * 0.5 + 0.12, barrier_h * 0.5],
+        [1, 0, 0, 0],
+        [0.30, 0.30, 0.32, 1.0],
+        friction,
+    )
+
     for side, y_sign in (("left", -1), ("right", 1)):
         world.add_geom(
             name=f"wall_{side}",

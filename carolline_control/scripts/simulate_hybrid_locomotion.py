@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import enum
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +35,7 @@ if str(REPO_ROOT) not in sys.path:
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config, load_raw_config
 from carolline_control.controllers.state_estimator import StateEstimator
+from carolline_control.sim.viewer_loop import tune_viewer_for_speed
 from carolline_control.utils.so3 import body_z_world
 from carolline_control.utils.types import ControlMode, ControllerConfig
 
@@ -544,11 +546,12 @@ def main() -> None:
     print(f"  mode: {last_mode_name}")
     print("-" * 60)
 
-    def control_step() -> bool:
+    def control_step(*, step_dt: float | None = None) -> bool:
         nonlocal last_mode_name
+        use_dt = dt if step_dt is None else step_dt
         state = estimator.estimate(data)
-        motor, cmd, mode, target = controller.compute(state, dt)
-        cont = director.update(state, mode, float(state.time), dt)
+        motor, cmd, mode, target = controller.compute(state, use_dt)
+        cont = director.update(state, mode, float(state.time), use_dt)
 
         if mode.name != last_mode_name:
             print(
@@ -581,25 +584,31 @@ def main() -> None:
     if args.no_viewer:
         run_until_done(lambda: mujoco.mj_step(model, data))
     else:
+        viewer_substeps = 20
+        frame_dt = dt * viewer_substeps
         with mujoco.viewer.launch_passive(model, data) as viewer:
+            tune_viewer_for_speed(viewer)
             viewer.cam.lookat[:] = [layout.platform.x_center, 0.0, 0.6]
             viewer.cam.distance = 14.0
             viewer.cam.azimuth = 120.0
             viewer.cam.elevation = -20.0
 
-            def _viewer_step() -> None:
-                mujoco.mj_step(model, data)
-                viewer.sync()
-
             while viewer.is_running() and data.time < args.duration:
-                still_running = control_step()
+                frame_start = time.perf_counter()
+                still_running = control_step(step_dt=frame_dt)
                 if not still_running or director.phase == MissionPhase.DONE:
                     if done_since is None:
                         done_since = float(data.time)
                     elif float(data.time) - done_since > 2.0:
                         print(f"t={data.time:6.2f}s  Mission complete.")
                         break
-                _viewer_step()
+                for _ in range(viewer_substeps):
+                    mujoco.mj_step(model, data)
+                viewer.sync(state_only=True)
+                elapsed = time.perf_counter() - frame_start
+                sleep_s = (1.0 / 30.0) - elapsed
+                if sleep_s > 0.0:
+                    time.sleep(sleep_s)
 
     print(f"Final mode: {controller.mode_manager.mode.name}  phase={director.phase.value}")
 

@@ -62,6 +62,11 @@ class ModeManager:
                 self.contact_loss_timer = 0.0
             else:
                 self.contact_loss_timer += dt
+                if self.contact_loss_timer >= self.config.contact_loss_grace:
+                    self.resume_rolling_after_recovery = True
+                    self.mode = ControlMode.PRETAKEOFF
+                    self.contact_loss_timer = 0.0
+                    self.pre_upright_timer = 0.0
 
             stalled = (
                 not self.rolling_hold_requested
@@ -117,7 +122,9 @@ class ModeManager:
             vel_z_ok = abs(state.velocity[2]) < self.config.hover_velocity_tolerance
             vel_xy = float(np.linalg.norm(state.velocity[:2]))
             vel_xy_ok = vel_xy < self.config.takeoff_horizontal_velocity_tolerance
-            if alt_ok and upright and vel_z_ok and vel_xy_ok:
+            # Require near-target altitude from below (or settled) to avoid locking in during overshoot.
+            at_or_below_hover = state.position[2] <= self.config.hover_height + 0.02
+            if alt_ok and upright and vel_z_ok and vel_xy_ok and at_or_below_hover:
                 self.mode = ControlMode.HOVER
                 self.hover_timer = 0.0
 

@@ -116,8 +116,12 @@ waypoints:
 timestep: 0.002
 sim_duration: 180.0
 idle_exit_delay: 3.0
-viewer_realtime: true
+viewer_realtime: false
 viewer_speed: 1.0
 viewer_hold_after_idle: 25.0
+viewer_substeps: 20
+viewer_target_fps: 30.0
+viewer_sync_state_only: true
+viewer_log_decimation: 4
 log_path: "carolline_control/logs/flight_log.csv"
 plot_path: "carolline_control/plots/actual_vs_desired.png"

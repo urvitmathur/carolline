@@ -1,0 +1,9 @@
+Hybrid roll/fly maze run summary
+success=False
+samples=1473
+duration_s=23.55
+phase_transitions=2
+
+Phase transitions:
+  t=   8.22s  ROLL -> RECOVER
+  t=  11.31s  RECOVER -> FLY

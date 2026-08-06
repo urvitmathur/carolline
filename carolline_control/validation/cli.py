@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from carolline_control.config_loader import load_config
+from carolline_control.sim_estimator import add_sensor_only_argument, print_estimator_mode
 from carolline_control.validation.config import load_validation_config
 from carolline_control.validation.monte_carlo import MonteCarloValidator
 from carolline_control.validation.report import generate_pdf_report
@@ -26,6 +27,7 @@ def main() -> None:
     parser.add_argument("--sensitivity", action="store_true", help="Run gain sensitivity sweep")
     parser.add_argument("--sensitivity-runs", type=int, default=10, help="Runs per sensitivity point")
     parser.add_argument("--no-report", action="store_true", help="Skip PDF report generation")
+    add_sensor_only_argument(parser)
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -39,18 +41,20 @@ def main() -> None:
 
     if args.sensitivity:
         print("Running parameter sensitivity analysis...")
-        analyzer = SensitivityAnalyzer(val_cfg, repo_root)
+        print_estimator_mode(sensor_only=args.sensor_only)
+        analyzer = SensitivityAnalyzer(val_cfg, repo_root, sensor_only=args.sensor_only)
         analyzer.run(runs_per_point=args.sensitivity_runs)
         print("Sensitivity analysis complete.")
         return
 
     print(f"Running Monte Carlo campaign '{args.campaign}' ({val_cfg.num_runs} runs)...")
+    print_estimator_mode(sensor_only=args.sensor_only)
 
     def progress(done: int, total: int, m) -> None:
         if done % max(1, total // 20) == 0 or done == total:
             print(f"  [{done}/{total}] success={m.mission_success}  mode={m.final_mode}  cause={m.failure_cause}")
 
-    mc = MonteCarloValidator(val_cfg, repo_root)
+    mc = MonteCarloValidator(val_cfg, repo_root, sensor_only=args.sensor_only)
     result = mc.run_campaign(args.campaign, num_runs=val_cfg.num_runs, progress_cb=progress)
 
     success_rate = sum(1 for m in result.metrics if m.mission_success) / max(len(result.metrics), 1)

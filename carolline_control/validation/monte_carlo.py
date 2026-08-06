@@ -21,10 +21,16 @@ class MonteCarloResult:
 
 
 class MonteCarloValidator:
-    def __init__(self, val_cfg: ValidationConfig, repo_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        val_cfg: ValidationConfig,
+        repo_root: Path | None = None,
+        *,
+        sensor_only: bool = False,
+    ) -> None:
         self.val_cfg = val_cfg
         self.repo_root = repo_root or Path(__file__).resolve().parents[2]
-        self.runner = ValidationRunner(val_cfg, self.repo_root)
+        self.runner = ValidationRunner(val_cfg, self.repo_root, sensor_only=sensor_only)
 
     def run_campaign(
         self,

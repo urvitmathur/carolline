@@ -93,19 +93,15 @@ class GroundDynamics:
         jacobian = tangent.T @ velocity_columns
         return jacobian, tangent, q_world
 
-    def desired_omega(
+    def desired_omega_from_world(
         self,
         state: RobotState,
-        desired_velocity_xy: np.ndarray,
+        velocity_world: np.ndarray,
     ) -> np.ndarray:
-        """Weighted minimum-norm angular velocity, paper Eq. (14)."""
+        """Weighted minimum-norm angular velocity on the support tangent plane."""
         jacobian, tangent, _ = self.rolling_jacobian(state)
-        velocity_world = np.array(
-            [desired_velocity_xy[0], desired_velocity_xy[1], 0.0],
-            dtype=float,
-        )
-        normal = state.contact_normal_world
-        normal = self._unit(normal, self.E3)
+        velocity_world = np.asarray(velocity_world, dtype=float).copy()
+        normal = self._unit(state.contact_normal_world, self.E3)
         velocity_world -= normal * float(np.dot(velocity_world, normal))
         velocity_tangent = tangent.T @ velocity_world
 
@@ -116,6 +112,19 @@ class GroundDynamics:
         damping = float(self.config.ground_pseudoinverse_damping)
         solve = np.linalg.pinv(normal_matrix + damping * np.eye(2))
         return weight_inv @ jacobian.T @ solve @ velocity_tangent
+
+    def desired_omega(
+        self,
+        state: RobotState,
+        desired_velocity_xy: np.ndarray,
+    ) -> np.ndarray:
+        """Weighted minimum-norm angular velocity, paper Eq. (14)."""
+        velocity = np.asarray(desired_velocity_xy, dtype=float)
+        if velocity.size >= 3:
+            velocity_world = velocity[:3]
+        else:
+            velocity_world = np.array([velocity[0], velocity[1], 0.0], dtype=float)
+        return self.desired_omega_from_world(state, velocity_world)
 
     def contact_inertia(self, state: RobotState) -> np.ndarray:
         """Time-varying inertia about the instantaneous contact point, Eq. (6)."""

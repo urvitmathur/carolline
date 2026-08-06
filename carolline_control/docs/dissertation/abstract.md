@@ -1,0 +1,10 @@
+# Abstract
+
+Hybrid ground–aerial robots combine the endurance and stability of rolling locomotion with the obstacle-crossing capability of flight. CAROLLINE is a caged quadcopter that rolls omnidirectionally inside a spherical protective cage and transitions to conventional multirotor flight after upright recovery. This project implemented a physics-based MuJoCo simulation of CAROLLINE and extended it with a full Python control and mission stack: ground rolling, arbitrary-pose recovery, geometric SE(3) flight control, autonomous checkpoint navigation with rangefinder perception, and a rolling-only simultaneous localisation and mapping (SLAM) pipeline for unknown maze exploration.
+
+The simulation reproduced the published rolling and pre-takeoff controllers, bidirectional ESC thrust mapping, and a complete roll–takeoff–hover–flight–land mission. Validation on twenty random ground orientations achieved 100% upright recovery (tilt 26°–172°) with mean recovery time 1.52 s. Takeoff tuning reduced vertical overshoot from 0.29 m to negligible levels on the reference seed. A Gazebo-style 9 m maze was built in simulation; oracle-mode rolling SLAM reached the goal in 105.6 s with 0.45 m final goal error and produced interpretable occupancy-grid maps.
+
+An original **obstacle-driven hybrid maze** mission was added in which forward, upward, and downward rangefinders classify wall blocks, floor gaps, and climb faces, triggering three distinct takeoff reasons (WALL, GAP, CLIMB). The vehicle rolled where possible and flew only when perception demanded it, completing the course in **94.9 s** with 0.40 m final goal error. Trajectory, altitude, mode-timeline, and tracking plots document each hybrid transition.
+
+The work demonstrates that mission-level autonomy and SLAM can be integrated above the CAROLLINE control stack without ROS, while highlighting limitations of dead-reckoned and scan-matching pose estimation in simulation. Future work should target hardware transfer, persistent map storage, and full SLAM-navigation missions without oracle pose.
+

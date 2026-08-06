@@ -4,6 +4,12 @@ State estimation from MuJoCo sensors and kinematics.
 Step 1 of the CAROLLINE architecture: reads position, quaternion,
 linear/angular velocity and constructs R, body/world vectors.
 No Euler angles are used internally.
+
+Oracle mode (default) uses ``qpos`` for pose — appropriate for controller
+development.  Sensor-only mode uses onboard-style IMU sensors plus velocity
+integration from a known initial spawn position (dead reckoning).
+SLAM odometry mode uses IMU sensors plus an external planar pose filter
+updated by the navigation SLAM stack.
 """
 
 from __future__ import annotations
@@ -11,16 +17,27 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 
-from carolline_control.utils.so3 import quat_to_rot
+from carolline_control.utils.so3 import attitude_error, quat_to_rot
 from carolline_control.utils.types import ControllerConfig, RobotState
 
 
 class StateEstimator:
     """Simulator-backed state estimator."""
 
-    def __init__(self, model: mujoco.MjModel, config: ControllerConfig) -> None:
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        config: ControllerConfig,
+        *,
+        sensor_only: bool = False,
+        slam_odom: bool = False,
+    ) -> None:
         self._model = model
         self._config = config
+        self._sensor_only = sensor_only
+        self._slam_odom = slam_odom
+        if sensor_only and slam_odom:
+            raise ValueError("StateEstimator cannot use sensor_only and slam_odom together.")
         self._body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "x2")
         self._site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "imu")
         self._cage_geom_ids = self._find_cage_geoms()
@@ -30,6 +47,52 @@ class StateEstimator:
         self._sensor_acc = self._sensor_adr("body_linacc", 3)
         self._sensor_linvel = self._try_sensor_adr("body_vel", 3)
         self._sensor_angvel = self._try_sensor_adr("body_angvel", 3)
+
+        self._integrated_position = np.zeros(3, dtype=float)
+        self._last_integration_time: float | None = None
+        self._seeded = False
+        self._last_good_quaternion = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        self._last_oracle_position_error = 0.0
+        self._last_oracle_attitude_error = 0.0
+        self._slam_position = np.zeros(3, dtype=float)
+        self._slam_seeded = False
+
+    @property
+    def sensor_only(self) -> bool:
+        return self._sensor_only
+
+    @property
+    def slam_odom(self) -> bool:
+        return self._slam_odom
+
+    @property
+    def last_oracle_position_error(self) -> float:
+        """Position error vs sim ground truth [m] (sensor-only mode only)."""
+        return self._last_oracle_position_error
+
+    @property
+    def last_oracle_attitude_error(self) -> float:
+        """Attitude error vs sim ground truth [rad] (sensor-only mode only)."""
+        return self._last_oracle_attitude_error
+
+    def reset(self, position: np.ndarray) -> None:
+        """Seed dead-reckoned position from a known spawn point."""
+        self._integrated_position = np.asarray(position, dtype=float).copy()
+        self._last_integration_time = None
+        self._seeded = True
+
+    def reset_slam_pose(self, position: np.ndarray) -> None:
+        """Seed SLAM planar position after spawn (orientation stays on IMU)."""
+        self._slam_position = np.asarray(position, dtype=float).copy()
+        self._slam_seeded = True
+
+    def apply_slam_pose(self, position: np.ndarray) -> None:
+        """Inject SLAM-corrected XY position; keep Z and attitude from IMU."""
+        pos = np.asarray(position, dtype=float).copy()
+        if self._slam_seeded:
+            pos[2] = self._slam_position[2]
+        self._slam_position = pos
+        self._slam_seeded = True
 
     def _find_cage_geoms(self) -> set[int]:
         """Find collision geoms rigidly belonging to the protective cage."""
@@ -41,8 +104,6 @@ class StateEstimator:
         if ids:
             return ids
 
-        # Fallback for detailed rib-cage models: every geom below a body whose
-        # name contains "cage" is considered part of the ground-contact shell.
         cage_bodies: set[int] = set()
         for body_id in range(self._model.nbody):
             name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_BODY, body_id)
@@ -82,8 +143,6 @@ class StateEstimator:
                 continue
             normal /= normal_norm
 
-            # Side impacts are useful collision information but are not a
-            # support surface for rolling/takeoff mode decisions.
             if normal[2] < self._config.contact_min_normal_z:
                 continue
 
@@ -121,32 +180,62 @@ class StateEstimator:
         start = self._model.sensor_adr[adr]
         return slice(start, start + size)
 
-    def estimate(self, data: mujoco.MjData) -> RobotState:
-        """Build RobotState from MuJoCo data buffers."""
-        position = data.qpos[:3].copy()
-        quaternion = data.qpos[3:7].copy()
+    @staticmethod
+    def _normalize_quaternion(quaternion: np.ndarray) -> np.ndarray:
+        quat = np.asarray(quaternion, dtype=float).copy()
+        norm = float(np.linalg.norm(quat))
+        if norm < 1e-9:
+            return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        return quat / norm
+
+    def _read_sensor_quaternion(self, data: mujoco.MjData) -> np.ndarray:
+        quat = self._normalize_quaternion(data.sensordata[self._sensor_quat])
+        self._last_good_quaternion = quat
+        return quat
+
+    def _integrate_position(self, data: mujoco.MjData, velocity: np.ndarray) -> np.ndarray:
+        if not self._seeded:
+            raise RuntimeError(
+                "Sensor-only estimator requires reset(position) after spawn pose is set."
+            )
+        sim_time = float(data.time)
+        if self._last_integration_time is not None:
+            dt = sim_time - self._last_integration_time
+            if dt > 0.0:
+                self._integrated_position += velocity * dt
+        self._last_integration_time = sim_time
+        return self._integrated_position.copy()
+
+    def _record_oracle_error(
+        self,
+        data: mujoco.MjData,
+        position: np.ndarray,
+        quaternion: np.ndarray,
+    ) -> None:
+        true_position = data.qpos[:3]
+        true_quaternion = self._normalize_quaternion(data.qpos[3:7])
+        self._last_oracle_position_error = float(np.linalg.norm(position - true_position))
+        true_rotation = quat_to_rot(true_quaternion)
+        est_rotation = quat_to_rot(quaternion)
+        self._last_oracle_attitude_error = float(np.linalg.norm(attitude_error(est_rotation, true_rotation)))
+
+    def _build_robot_state(
+        self,
+        *,
+        data: mujoco.MjData,
+        position: np.ndarray,
+        quaternion: np.ndarray,
+        velocity: np.ndarray,
+        omega_body: np.ndarray,
+        omega_world: np.ndarray,
+        accel_body: np.ndarray,
+    ) -> RobotState:
         rotation = quat_to_rot(quaternion)
-
-        if self._sensor_linvel is not None:
-            velocity = data.sensordata[self._sensor_linvel].copy()
-        else:
-            velocity = data.qvel[:3].copy()
-
-        if self._sensor_angvel is not None:
-            omega_world = data.sensordata[self._sensor_angvel].copy()
-        else:
-            omega_world = data.qvel[3:6].copy()
-        omega_body = rotation.T @ omega_world
-
-        accel_body = data.sensordata[self._sensor_acc].copy()
         contact_valid, contact_point, contact_normal, contact_force = self._support_contact(
             data, position
         )
-        # Treat the vehicle as grounded while the cage center remains near the
-        # support plane, even if the contact solver briefly loses rib contacts.
         on_ground = contact_valid or position[2] <= self._config.cage_radius + 0.12
         if contact_valid:
-            # Existing landing logic expects a center-height reference.
             ground_contact_z = float(position[2])
         else:
             ground_contact_z = self._config.cage_radius
@@ -175,6 +264,98 @@ class StateEstimator:
                 )
             ),
             contact_valid=contact_valid,
+        )
+
+    def estimate(self, data: mujoco.MjData) -> RobotState:
+        """Build RobotState from MuJoCo data buffers."""
+        if self._slam_odom:
+            return self._estimate_slam_odom(data)
+        if self._sensor_only:
+            return self._estimate_sensor_only(data)
+        return self._estimate_oracle(data)
+
+    def _estimate_oracle(self, data: mujoco.MjData) -> RobotState:
+        position = data.qpos[:3].copy()
+        quaternion = data.qpos[3:7].copy()
+        rotation = quat_to_rot(quaternion)
+
+        if self._sensor_linvel is not None:
+            velocity = data.sensordata[self._sensor_linvel].copy()
+        else:
+            velocity = data.qvel[:3].copy()
+
+        if self._sensor_angvel is not None:
+            omega_world = data.sensordata[self._sensor_angvel].copy()
+        else:
+            omega_world = data.qvel[3:6].copy()
+        omega_body = rotation.T @ omega_world
+
+        accel_body = data.sensordata[self._sensor_acc].copy()
+        self._last_oracle_position_error = 0.0
+        self._last_oracle_attitude_error = 0.0
+        return self._build_robot_state(
+            data=data,
+            position=position,
+            quaternion=quaternion,
+            velocity=velocity,
+            omega_body=omega_body,
+            omega_world=omega_world,
+            accel_body=accel_body,
+        )
+
+    def _estimate_slam_odom(self, data: mujoco.MjData) -> RobotState:
+        if not self._slam_seeded:
+            raise RuntimeError(
+                "SLAM odometry estimator requires reset_slam_pose() after spawn pose is set."
+            )
+        quaternion = self._read_sensor_quaternion(data)
+        rotation = quat_to_rot(quaternion)
+
+        if self._sensor_linvel is not None:
+            velocity = data.sensordata[self._sensor_linvel].copy()
+        else:
+            velocity = data.qvel[:3].copy()
+
+        omega_body = data.sensordata[self._sensor_gyro].copy()
+        omega_world = rotation @ omega_body
+        accel_body = data.sensordata[self._sensor_acc].copy()
+        position = self._slam_position.copy()
+        self._record_oracle_error(data, position, quaternion)
+
+        return self._build_robot_state(
+            data=data,
+            position=position,
+            quaternion=quaternion,
+            velocity=velocity,
+            omega_body=omega_body,
+            omega_world=omega_world,
+            accel_body=accel_body,
+        )
+
+    def _estimate_sensor_only(self, data: mujoco.MjData) -> RobotState:
+        quaternion = self._read_sensor_quaternion(data)
+        rotation = quat_to_rot(quaternion)
+
+        if self._sensor_linvel is not None:
+            velocity = data.sensordata[self._sensor_linvel].copy()
+        else:
+            velocity = data.qvel[:3].copy()
+
+        omega_body = data.sensordata[self._sensor_gyro].copy()
+        omega_world = rotation @ omega_body
+
+        accel_body = data.sensordata[self._sensor_acc].copy()
+        position = self._integrate_position(data, velocity)
+        self._record_oracle_error(data, position, quaternion)
+
+        return self._build_robot_state(
+            data=data,
+            position=position,
+            quaternion=quaternion,
+            velocity=velocity,
+            omega_body=omega_body,
+            omega_world=omega_world,
+            accel_body=accel_body,
         )
 
     def fill_inertial_params(self, config: ControllerConfig) -> None:

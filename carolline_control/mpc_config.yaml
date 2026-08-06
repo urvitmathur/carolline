@@ -1,0 +1,24 @@
+# MPC weights for comparative studies (geometric vs LQR vs MPC)
+
+flight:
+  dt: 0.004
+  horizon: 80
+  qf_scale: 4.0
+  q_pos: [28.0, 28.0, 32.0]
+  q_vel: [8.0, 8.0, 10.0]
+  q_att: [16.0, 16.0, 6.0]
+  q_rate: [3.0, 3.0, 2.0]
+  r_thrust: 0.05
+  r_moment: [0.04, 0.04, 0.03]
+
+rolling:
+  dt: 0.004
+  horizon: 30
+  qf_scale: 3.0
+  q_vel: [16.0, 16.0]
+  q_rate: [5.0, 5.0, 2.5]
+  r_torque: [0.04, 0.04, 0.06]
+  torque_limit: 8.0
+
+comparison:
+  output_dir: "carolline_control/plots/controller_comparison"

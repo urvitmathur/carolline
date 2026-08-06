@@ -32,8 +32,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config, load_raw_config
-from carolline_control.controllers.state_estimator import StateEstimator
 from carolline_control.logging.pipeline_tracer import PipelineAbort
+from carolline_control.sim_estimator import (
+    add_sensor_only_argument,
+    build_estimator,
+    print_estimator_mode,
+    seed_estimator_from_sim,
+)
 from carolline_control.utils.so3 import body_z_world, rot_to_euler_zyx
 from carolline_control.utils.types import ControlMode
 from carolline_control.visualization.markers import compile_model_with_markers
@@ -161,14 +166,14 @@ def run_trial(
     raw: dict,
     timeout_s: float,
     tilt_range: tuple[float, float],
+    sensor_only: bool = False,
 ) -> MissionTrial:
     rng = random.Random(seed)
     np.random.seed(seed)
 
     model = compile_model_with_markers(config.model_path, config)
     data = mujoco.MjData(model)
-    estimator = StateEstimator(model, config)
-    estimator.fill_inertial_params(config)
+    estimator = build_estimator(model, config, sensor_only=sensor_only)
 
     # Full airborne mission starts with recovery (same as recovery validator).
     config.initial_mode = ControlMode.PRETAKEOFF
@@ -183,6 +188,7 @@ def run_trial(
     data.qpos[:7] = np.asarray(qpos, dtype=float)
     data.qvel[:] = 0.0
     mujoco.mj_forward(model, data)
+    seed_estimator_from_sim(estimator, data)
 
     dt = float(model.opt.timestep)
 
@@ -454,6 +460,7 @@ def main() -> None:
         "--csv",
         default=str(REPO_ROOT / "carolline_control" / "logs" / "monte_carlo_validation.csv"),
     )
+    add_sensor_only_argument(parser)
     args = parser.parse_args()
 
     raw = load_raw_config(args.config)
@@ -461,6 +468,7 @@ def main() -> None:
     timeout = float(args.timeout) if args.timeout is not None else float(raw.get("sim_duration", 300.0))
 
     print("CAROLLINE Monte Carlo full-mission validation")
+    print_estimator_mode(sensor_only=args.sensor_only)
     print(f"  model       : {cfg0.model_path}")
     print(f"  trials      : {args.trials}")
     print(f"  timeout     : {timeout}s / trial")
@@ -479,6 +487,7 @@ def main() -> None:
             raw=raw,
             timeout_s=timeout,
             tilt_range=(args.tilt_min, args.tilt_max),
+            sensor_only=args.sensor_only,
         )
         results.append(r)
         _print_trial(r)

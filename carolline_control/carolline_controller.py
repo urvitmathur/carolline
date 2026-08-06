@@ -496,7 +496,7 @@ class CarollineController:
 
         gains = (
             (self.config.kR_pre, self.config.kOmega_pre)
-            if mode in (ControlMode.PRETAKEOFF, ControlMode.UPRIGHT, ControlMode.ROLLING)
+            if mode == ControlMode.TAKEOFF
             else (self.config.kR, self.config.kOmega)
         )
         omega_d = self.attitude.compute_desired_omega(

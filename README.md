@@ -52,6 +52,7 @@ Main rolling and flight mission:
 
 ```powershell
 python -m carolline_control.main
+python -m carolline_control.main --sensor-only --no-viewer --seed 42
 ```
 
 Ramp and platform mission:
@@ -81,7 +82,7 @@ python carolline_control/scripts/manual_teleop.py --scene course
 python carolline_control/scripts/manual_teleop.py --scene platform
 ```
 
-Use **1–8** for modes (1=rolling, 2=pretakeoff, 4=takeoff, 6=flight, 7=landing). **Hold arrow keys** to move, **release to stop**. **Page Up/Down** for vertical in air; **Q/E** yaw; **R** roll-hold; **/** help.
+Use **arrow keys** to roll (hold to move, X to stop). **1–8** for modes. **Page Up/Down** for vertical in air; **Q/E** yaw; **R** roll-hold; **/** help.
 MuJoCo viewer UI is enabled (joints, controls, visualization toggles).
 
 RC motor teleop (direct transmitter → motors, bypasses velocity controller):
@@ -95,14 +96,52 @@ python carolline_control/scripts/rc_motor_teleop.py --list-joysticks
 **direct** mode: per-motor trim on numpad (1/2, 4/5, 7/8, 3/6). **acro** mode: W/S throttle, **arrow keys** pitch/roll, Q/E yaw.
 **H** = hover thrust, **0** or **X** = zero motors. Optional USB gamepad via `--joystick 0`.
 
+## LQR comparative study (geometric vs LQR)
+
+Side-by-side benchmarks for your comparative analysis:
+
+```powershell
+python carolline_control/scripts/compare_controllers.py
+python carolline_control/scripts/compare_flight_controllers.py
+python carolline_control/scripts/compare_rolling_controllers.py
+python tests/test_lqr_gains.py
+```
+
+Outputs land in `carolline_control/plots/lqr_comparison/` (CSV metrics + plots).
+Tune LQR weights in `carolline_control/lqr_config.yaml`.
+
+| Domain | Geometric baseline | LQR variant |
+|--------|-------------------|-------------|
+| Aerial | Lee SO(3) position + attitude PD | 12-state hover LQR on wrench |
+| Ground | Paper rolling PD + allocation | 5-state velocity/rate LQR on torque |
+
 ## Tests and validation
 
 ```powershell
 python tests/test_ground_dynamics.py
 python tests/test_esc_mapper.py
+python tests/test_state_estimator.py
 python carolline_control/scripts/validate_recovery.py
 python carolline_control/scripts/validate_monte_carlo.py
 python carolline_control/scripts/validate_energy_cot.py
+```
+
+### Sensor-only estimation (hardware-realistic mode)
+
+By default the simulator reads pose from MuJoCo `qpos` (oracle mode). Use
+`--sensor-only` to drive controllers from IMU sensors only:
+
+- Orientation: `body_quat`
+- Angular rate: `body_gyro`
+- Velocity: `body_vel`
+- Acceleration: `body_linacc`
+- Position: dead-reckoned from known spawn + velocity integration
+
+```powershell
+python -m carolline_control.main --sensor-only --no-viewer --seed 42
+python carolline_control/scripts/validate_recovery.py --sensor-only --trials 20
+python carolline_control/scripts/validate_monte_carlo.py --sensor-only --trials 10
+python -m carolline_control.validation --sensor-only --campaign nominal --runs 5
 ```
 
 Negative rotor values are intentional: the CAROLLINE model uses bidirectional

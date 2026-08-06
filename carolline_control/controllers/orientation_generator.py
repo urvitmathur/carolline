@@ -53,7 +53,11 @@ class OrientationGenerator:
         The thrust axis stays near horizontal while the cage rolls.
         b3_des is perpendicular to desired planar velocity and world up.
         """
-        v_des = np.array([desired_velocity_xy[0], desired_velocity_xy[1], 0.0])
+        v_des = np.asarray(desired_velocity_xy, dtype=float).reshape(-1)
+        if v_des.size >= 3:
+            v_des = np.array([v_des[0], v_des[1], 0.0], dtype=float)
+        else:
+            v_des = np.array([v_des[0], v_des[1], 0.0], dtype=float)
         speed = np.linalg.norm(v_des)
         if speed < 1e-3:
             return state.rotation.copy()

@@ -1,0 +1,54 @@
+generated_from: carolline_control/logs/*.csv
+seed_reference: 42
+vehicle:
+  mass_kg: 2.125
+  hover_height_m: 1.0
+  motor_thrust_range_N:
+  - -13.0
+  - 13.0
+  cage_radius_m: 0.4
+hybrid_mission:
+  duration_s: 56.286000000022824
+  mode_times_s:
+    pretakeoff: 4.585999999999717
+    upright: 5.7339999999995905
+    takeoff: 6.5539999999995
+    hover: 7.275999999999421
+    flight: 12.27800000000077
+    landing: 51.38000000001683
+    idle: 53.28600000001916
+  takeoff_z_peak_m: 0.99520502217189
+  takeoff_z_overshoot_m: 0.0
+  hover_height_m: 1.0
+  final_mode: IDLE
+  max_z_tracking_error_m: 0.6001138394186931
+hybrid_maze:
+  duration_s: 94.8
+  success: true
+  dist_goal_m: 0.40
+  takeoffs: [WALL, GAP, CLIMB]
+recovery:
+  trials: 20
+  success_count: 20
+  success_rate_pct: 100.0
+  tilt_deg_min: 26.0
+  tilt_deg_max: 171.6
+  mean_time_to_upright_s: 1.52
+takeoff:
+  trials: 10
+  hover_achieved_count: 10
+  hover_achieved_rate_pct: 100.0
+  mean_time_to_hover_s: 2.06
+  mean_vertical_overshoot_m: 0.289
+  max_vertical_overshoot_m: 0.289
+monte_carlo:
+  trials: 30
+  success_count: 0
+  success_rate_pct: 0.0
+maze_slam:
+  arena_size_m: 9.0
+  oracle_goal_reached_s: 105.6
+  oracle_dist_goal_m: 0.45
+  map_resolution_m: 0.03
+takeoff_overshoot_before_fix_m: 0.286
+takeoff_overshoot_after_fix_m: 0.0

@@ -42,9 +42,16 @@ class RollingController:
         """
         _ = yaw, dt
         velocity = np.asarray(desired_velocity_xy, dtype=float).copy()
-        speed = float(np.linalg.norm(velocity))
+        if velocity.size >= 3:
+            velocity_world = velocity[:3].astype(float)
+        else:
+            velocity_world = np.array([velocity[0], velocity[1], 0.0], dtype=float)
+        normal = self.dynamics._unit(state.contact_normal_world, self.dynamics.E3)
+        velocity_world -= normal * float(np.dot(velocity_world, normal))
+        speed = float(np.linalg.norm(velocity_world))
         if speed > self._config.rolling_max_speed:
-            velocity *= self._config.rolling_max_speed / speed
+            velocity_world *= self._config.rolling_max_speed / speed
+            speed = float(np.linalg.norm(velocity_world))
 
         active = hold or speed >= 1e-3 or abs(yaw_rate) >= 1e-3
         if not active:
@@ -56,7 +63,7 @@ class RollingController:
                 mode=ControlMode.ROLLING,
             )
 
-        omega_body = self.dynamics.desired_omega(state, velocity)
+        omega_body = self.dynamics.desired_omega_from_world(state, velocity_world)
         if abs(yaw_rate) >= 1e-3:
             _, _, normal_world = self.dynamics.contact_geometry(state)
             normal_body = state.rotation.T @ normal_world

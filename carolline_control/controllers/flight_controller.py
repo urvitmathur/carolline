@@ -85,8 +85,8 @@ class FlightController:
         if mode == ControlMode.TAKEOFF:
             weight = mass * g
             bz_takeoff = float(body_z_world(state.rotation)[2])
-            alt_err = float(target.position[2] - state.position[2])
-            if alt_err > 0.05 and bz_takeoff >= self._config.takeoff_cos_threshold:
+            alt_remaining = float(target.position[2] - state.position[2])
+            if alt_remaining > 0.05 and bz_takeoff >= self._config.takeoff_cos_threshold:
                 climb_frac = float(
                     np.clip(
                         (state.position[2] - self._config.cage_radius)
@@ -95,8 +95,14 @@ class FlightController:
                         1.0,
                     )
                 )
-                min_vertical = weight * (1.08 + 0.35 * climb_frac)
+                # Fade climb assist as the cage nears hover height to avoid Z overshoot.
+                approach_scale = float(np.clip(alt_remaining / 0.35, 0.0, 1.0))
+                min_vertical = weight * (1.02 + 0.28 * climb_frac * approach_scale)
                 f_des[2] = max(f_des[2], min_vertical)
+            if alt_remaining < 0.18 and state.velocity[2] > 0.0:
+                f_des[2] -= mass * (4.0 + 6.0 * (0.18 - max(alt_remaining, 0.0)) / 0.18) * state.velocity[2]
+            if ex[2] > 0.0:
+                f_des[2] -= mass * (8.0 * ex[2] + 3.0 * max(state.velocity[2], 0.0))
             # Damp horizontal carry-over from rolling before switching to HOVER.
             f_des[0] -= mass * 3.0 * state.velocity[0]
             f_des[1] -= mass * 3.0 * state.velocity[1]

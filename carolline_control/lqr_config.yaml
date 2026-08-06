@@ -1,0 +1,25 @@
+# LQR weights for comparative studies (geometric vs LQR)
+# Used by compare_flight_controllers.py and compare_rolling_controllers.py
+
+flight:
+  dt: 0.004
+  q_pos: [12.0, 12.0, 18.0]
+  q_vel: [8.0, 8.0, 10.0]
+  q_att: [14.0, 14.0, 6.0]
+  q_rate: [3.0, 3.0, 2.0]
+  r_thrust: 0.08
+  r_moment: [0.12, 0.12, 0.06]
+
+rolling:
+  dt: 0.004
+  q_vel: [10.0, 10.0]
+  q_rate: [4.0, 4.0, 2.0]
+  r_torque: [0.06, 0.06, 0.10]
+
+comparison:
+  flight_duration: 8.0
+  flight_step_x: 0.75
+  hover_height: 1.0
+  rolling_duration: 6.0
+  rolling_speed: 1.5
+  output_dir: "carolline_control/plots/lqr_comparison"

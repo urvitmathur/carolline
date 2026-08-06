@@ -1,0 +1,49 @@
+# Mixed terrain mobility test scene for CAROLLINE caged drone
+# Flat meadow (west) -> rolling hills (center) -> mountains (east)
+
+model_path: "mujoco_menagerie-main/skydio_x2/scene.xml"
+
+terrain:
+  half_x: 14.0
+  half_y: 14.0
+  max_height: 1.45
+  base_thickness: 0.04
+  nrow: 128
+  ncol: 128
+  flat_x_end: -7.0
+  hills_x_end: 2.0
+  seed: 7
+  friction: [0.88, 0.010, 0.005]
+
+# Faster rolling on uneven heightfield (override config.yaml limits)
+mobility:
+  rolling_max_speed: 4.75
+  patrol_speed: 3.25
+  teleop_ground_speed: 4.75
+  teleop_time_constant: 0.030
+  rolling_kp: 0.85
+  rolling_kd: 1.20
+  rolling_omega_kp: [12.0, 12.0, 4.5]
+  motor_slew_rate: 1400.0
+  friction: [0.88, 0.010, 0.005]
+
+spawn:
+  xy: [-10.0, 0.0]
+  random_orientation: true
+  settle_steps: 400
+
+# Rolling patrol checkpoints sampled on the terrain surface (x, y)
+checkpoints:
+  - [-10.0, 0.0]
+  - [-5.0, 3.0]
+  - [-1.0, -2.5]
+  - [3.5, 2.0]
+  - [7.0, -3.0]
+  - [10.5, 1.0]
+
+simulation:
+  timestep: 0.004
+  duration: 180.0
+  patrol_speed: 3.25
+  patrol_arrival_radius: 0.45
+  patrol_slowdown_radius: 1.2

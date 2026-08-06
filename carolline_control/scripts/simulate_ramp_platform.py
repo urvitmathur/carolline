@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import enum
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,8 @@ if str(REPO_ROOT) not in sys.path:
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config, load_raw_config
 from carolline_control.controllers.state_estimator import StateEstimator
+from carolline_control.sim.viewer_loop import tune_viewer_for_speed
+from carolline_control.scripts.manual_teleop import update_tracking_camera
 from carolline_control.rolling_ramp.path import RampGeometry
 from carolline_control.utils.so3 import body_z_world
 from carolline_control.utils.types import ControlMode, ControllerConfig, RobotState
@@ -711,8 +714,9 @@ def main() -> None:
     }
     stuck_test_pose = data.qpos[:7].copy()
 
-    def control_step() -> bool:
+    def control_step(*, step_dt: float | None = None) -> bool:
         nonlocal last_mode_name
+        use_dt = dt if step_dt is None else step_dt
         if args.test_stuck and 0.5 <= float(data.time) <= 2.5:
             # Verification-only synthetic obstruction. Normal viewer runs never
             # alter pose and use physical contacts exclusively.
@@ -721,8 +725,8 @@ def main() -> None:
             mujoco.mj_forward(model, data)
 
         state = estimator.estimate(data)
-        motor, cmd, mode, target = controller.compute(state, dt)
-        cont = director.update(state, mode, float(state.time), dt)
+        motor, cmd, mode, target = controller.compute(state, use_dt)
+        cont = director.update(state, mode, float(state.time), use_dt)
 
         diagnostics = controller.last_diagnostics
         requested_moment = diagnostics.moment_body.copy()
@@ -780,13 +784,18 @@ def main() -> None:
                 break
             mujoco.mj_step(model, data)
     else:
+        viewer_substeps = 20
+        frame_dt = dt * viewer_substeps
         with mujoco.viewer.launch_passive(model, data) as viewer:
-            viewer.cam.lookat[:] = [float(cam_look[0]), 0.0, 0.7]
-            viewer.cam.distance = 16.0
+            tune_viewer_for_speed(viewer)
             viewer.cam.azimuth = 115.0
             viewer.cam.elevation = -18.0
+            track_distance = 10.0
+            update_tracking_camera(viewer, data.qpos[:3], look_height=0.35, distance=track_distance)
             while viewer.is_running() and data.time < args.duration:
-                still = control_step()
+                frame_start = time.perf_counter()
+                still = control_step(step_dt=frame_dt)
+                update_tracking_camera(viewer, data.qpos[:3], look_height=0.35, distance=track_distance)
                 req = np.asarray(telemetry["requested_moment"])
                 applied = np.asarray(telemetry["applied_moment"])
                 motors = np.asarray(telemetry["motors"])
@@ -823,8 +832,13 @@ def main() -> None:
                 )
                 if (not still or director.phase == MissionPhase.DONE) and maybe_finish(float(data.time)):
                     break
-                mujoco.mj_step(model, data)
-                viewer.sync()
+                for _ in range(viewer_substeps):
+                    mujoco.mj_step(model, data)
+                viewer.sync(state_only=True)
+                elapsed = time.perf_counter() - frame_start
+                sleep_s = (1.0 / 30.0) - elapsed
+                if sleep_s > 0.0:
+                    time.sleep(sleep_s)
 
     print(f"Final mode: {controller.mode_manager.mode.name}  phase={director.phase.value}")
     print(

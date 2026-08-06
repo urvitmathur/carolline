@@ -6,32 +6,57 @@ sim_duration: 360.0
 log_path: "carolline_control/logs/rolling_ramp_log.csv"
 plot_dir: "carolline_control/plots/rolling_ramp"
 
-spawn_xy: [0.5, 0.0]
-ground_z: 0.40
+spawn_s: 0.0
+spawn_tilt_deg: 58.0
 random_initial_orientation: false
 seed: 42
 
-# Ramp course geometry (flat → up → flat → down → flat)
+viewer_substeps: 25
+viewer_control_every: 5
+viewer_target_fps: 30.0
+viewer_sync_state_only: true
+viewer_keep_textures: false
+viewer_log_decimation: 8
+viewer_track_distance: 9.0
+viewer_cam_azimuth: 125.0
+viewer_cam_elevation: -22.0
+viewer_track_look_height: 0.35
+
+record_path: "carolline_control/plots/rolling_ramp/rolling_ramp.mp4"
+record_fps: 30
+record_width: 1280
+record_height: 720
+settle_steps: 200
+record_warmup: 1.0
+
 ramp:
-  angle_deg: 25.0
-  flat_start: 1.5
+  angle_deg: 10.0
   ramp_length: 3.5
   flat_top: 4.0
   flat_end: 2.0
   width: 2.5
   y_center: 0.0
 
-# Path following (arc-length + cross-track)
-lookahead: 0.35
-path_kp: 0.70
-path_kd: 0.75
-cross_kp: 1.0
-cross_kd: 0.70
-thrust_scale: 0.50
+planner:
+  lookahead: 0.22
+  max_carrot: 0.12
+  home_s: 0.0
+  path_kp: 1.10
+  path_kd: 0.38
+  cross_kp: 1.00
+  cross_kd: 0.55
+  velocity_filter_tau: 0.18
+  done_settle_time: 0.55
+  home_arrival_speed: 0.06
+  end_approach_length: 0.55
 
-# Rolling controller tuning
-rolling_max_speed: 0.38
-rolling_kp: 0.65
-rolling_kd: 1.05
-path_kp: 0.70
-roll_position_tolerance: 0.12
+mobility:
+  rolling_max_speed: 0.48
+  rolling_kp: 0.88
+  rolling_kd: 0.88
+  roll_position_tolerance: 0.06
+  rolling_omega_kp: [8.5, 8.5, 2.8]
+  ground_omega_kp: [8.0, 8.0, 2.8]
+  ground_omega_weights: [0.95, 0.95, 24.0]
+  motor_slew_rate: 850.0
+  ground_max_unload_fraction: 0.32

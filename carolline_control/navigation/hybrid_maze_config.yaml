@@ -1,0 +1,105 @@
+# Hybrid roll/fly maze — matches hybrid_drone_slam_maze_3d_orbit.html
+# Used by: scripts/simulate_hybrid_maze.py
+
+model_path: "mujoco_menagerie-main/skydio_x2/scene_cage.xml"
+
+arena:
+  half_x: 6.0
+  half_y: 4.0
+  wall_height: 0.70
+  wall_thickness: 0.20
+
+# World coords: HTML (hx,hz) -> (hx-6, hz-4)
+spawn: [-4.5, 2.5]
+goal: [5.0, 0.0]
+
+platform:
+  x: 4.5
+  y: 0.0
+  half_x: 1.50
+  half_y: 1.70
+  height: 1.20
+
+gap:
+  x: 1.50
+  y: -1.95
+  half_x: 0.70
+  half_y: 0.55
+
+low_wall:
+  x: -2.0
+  y: -1.0
+  half_x: 0.70
+  half_y: 0.10
+  height: 0.50
+
+# Internal corridor walls (axis-aligned boxes: x, y, half_x, half_y, height)
+walls:
+  # Vertical divider near start corridor
+  - {x: -3.3, y: 1.6, half_x: 0.12, half_y: 1.70, height: 1.0}
+  # Horizontal barrier forming dead-end spur
+  - {x: -1.4, y: 0.4, half_x: 1.80, half_y: 0.12, height: 1.0}
+  # Short vertical after hop channel
+  - {x: 0.7, y: 0.1, half_x: 0.12, half_y: 1.00, height: 1.0}
+  # Dead-end spur stopper (south of junction)
+  - {x: -4.5, y: -2.4, half_x: 0.90, half_y: 0.12, height: 0.90}
+
+checkpoints:
+  deadend: [-4.5, -1.8]
+  junction: [-4.5, -0.5]
+  hop_approach: [-2.0, -0.5]
+  # Land clear of the low wall (wall south face ~y=-1.1; cage radius ~0.4)
+  hop_land: [-2.0, -1.95]
+  # Stay west of trench (gap left edge ~0.8; leave cage radius clearance)
+  gap_approach: [0.20, -1.95]
+  gap_land: [2.60, -1.95]
+  shaft_base: [2.58, 0.0]  # west of platform face (x=3.0); roll from gap east edge
+  platform_land: [4.6, 0.0]
+
+flight:
+  hop_clearance: 0.55
+  gap_clearance: 0.70
+  shaft_clearance: 0.45
+  hover_settle_s: 0.8
+  land_hold_s: 0.9
+  fly_xy_tol: 0.40
+  fly_z_tol: 0.45
+
+rolling:
+  arrival_radius: 0.45
+  slowdown_radius: 0.90
+  patrol_speed: 1.40
+
+mobility:
+  rolling_max_speed: 1.80
+  rolling_kp: 0.72
+  rolling_kd: 1.05
+  motor_slew_rate: 700.0
+
+perception:
+  max_range: 6.0
+  forward_cone_deg: 80.0
+  dense_rays: true
+  dense_ray_count: 24
+  stop_distance: 0.40
+  fly_clearance: 0.90
+  climb_clearance: 1.80
+  gap_down_threshold: 1.50
+  max_roll_height: 0.35
+  blocked_confirm_time: 0.35
+
+terrain:
+  friction: [0.88, 0.010, 0.005]
+
+simulation:
+  timestep: 0.004
+  duration: 240.0
+  settle_steps: 400
+  viewer_substeps: 12
+  viewer_control_every: 4
+  viewer_sync_state_only: true
+  viewer_keep_textures: true
+  viewer_keep_lights: true
+  viewer_track_distance: 11.0
+  viewer_cam_azimuth: 125.0
+  viewer_cam_elevation: -28.0

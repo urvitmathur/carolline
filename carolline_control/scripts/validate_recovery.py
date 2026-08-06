@@ -28,7 +28,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from carolline_control.carolline_controller import CarollineController
 from carolline_control.config_loader import load_config, load_raw_config
-from carolline_control.controllers.state_estimator import StateEstimator
+from carolline_control.sim_estimator import (
+    add_sensor_only_argument,
+    build_estimator,
+    print_estimator_mode,
+    seed_estimator_from_sim,
+)
 from carolline_control.utils.so3 import attitude_error, body_z_world, rot_to_euler_zyx
 from carolline_control.utils.types import ControlMode
 from carolline_control.visualization.markers import compile_model_with_markers
@@ -101,14 +106,14 @@ def run_trial(
     config,
     raw: dict,
     timeout_s: float,
+    sensor_only: bool = False,
 ) -> TrialResult:
     rng = random.Random(seed)
     np.random.seed(seed)
 
     model = compile_model_with_markers(config.model_path, config)
     data = mujoco.MjData(model)
-    estimator = StateEstimator(model, config)
-    estimator.fill_inertial_params(config)
+    estimator = build_estimator(model, config, sensor_only=sensor_only)
 
     # Force recovery mission: start in PRETAKEOFF and freeze flight transitions.
     config.initial_mode = ControlMode.PRETAKEOFF
@@ -121,6 +126,7 @@ def run_trial(
     data.qpos[:7] = np.asarray(qpos, dtype=float)
     data.qvel[:] = 0.0
     mujoco.mj_forward(model, data)
+    seed_estimator_from_sim(estimator, data)
 
     roll0, pitch0, yaw0 = _euler_from_quat(data.qpos[3:7])
     state0 = estimator.estimate(data)
@@ -321,6 +327,7 @@ def main() -> None:
         default=str(REPO_ROOT / "carolline_control" / "logs" / "recovery_validation.csv"),
         help="Output CSV path",
     )
+    add_sensor_only_argument(parser)
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -329,6 +336,7 @@ def main() -> None:
     config.initial_mode = ControlMode.PRETAKEOFF
 
     print("CAROLLINE upright recovery validation")
+    print_estimator_mode(sensor_only=args.sensor_only)
     print(f"  model      : {config.model_path}")
     print(f"  trials     : {args.trials}")
     print(f"  timeout    : {args.timeout}s / trial")
@@ -349,6 +357,7 @@ def main() -> None:
             config=cfg,
             raw=raw,
             timeout_s=args.timeout,
+            sensor_only=args.sensor_only,
         )
         results.append(r)
         _print_trial(r)
